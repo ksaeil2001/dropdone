@@ -3,7 +3,7 @@
 ; 전제조건: dist\DropDone.exe 빌드 완료 상태
 
 #define MyAppName "DropDone"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "DropDone"
 #define MyAppURL "https://github.com/ksaeil2001/dropdone"
 #define MyAppExeName "DropDone.exe"
@@ -42,7 +42,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 MinVersion=10.0
 
 ; 언인스톨
-UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayIcon={app}\DropDone\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 
 ; 설치 마법사 외관
@@ -59,33 +59,30 @@ Name: "desktopicon"; Description: "바탕화면에 바로가기 만들기"; Grou
 Name: "startupicon"; Description: "Windows 시작 시 자동 실행"; GroupDescription: "시작 설정:"; Flags: unchecked
 
 [Files]
-; 메인 실행파일
-Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-
-; 아이콘 (있는 경우)
-Source: "assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion skipifsourcedoesntexist
+; onedir 빌드 — dist\DropDone\ 폴더 전체 포함
+Source: "dist\DropDone\*"; DestDir: "{app}\DropDone"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Chrome Extension 폴더 (있는 경우)
 Source: "extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 ; 시작 메뉴
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Comment: "{#MyAppDescription}"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\DropDone\{#MyAppExeName}"; Comment: "{#MyAppDescription}"
 Name: "{group}\{#MyAppName} 제거"; Filename: "{uninstallexe}"
 
 ; 바탕화면 (선택)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\DropDone\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
 ; 자동 시작 등록 (선택한 경우)
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startupicon
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\DropDone\{#MyAppExeName}"""; Flags: uninsdeletevalue; Tasks: startupicon
 
 ; 앱 정보 등록 (프로그램 추가/제거에 표시)
 Root: HKCU; Subkey: "Software\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 
 [Run]
 ; 설치 완료 후 바로 실행 (체크박스)
-Filename: "{app}\{#MyAppExeName}"; Description: "DropDone 지금 실행하기"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\DropDone\{#MyAppExeName}"; Description: "DropDone 지금 실행하기"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 언인스톨 전 프로세스 종료

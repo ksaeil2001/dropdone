@@ -73,6 +73,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', len(body))
+            # JS/CSS/아이콘은 1시간 캐시, HTML은 no-cache (항상 최신)
+            if path.endswith(('.js', '.css', '.ico', '.png')):
+                self.send_header('Cache-Control', 'max-age=3600')
+            else:
+                self.send_header('Cache-Control', 'no-cache')
             self.end_headers()
             self.wfile.write(body)
         except FileNotFoundError:

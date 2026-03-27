@@ -20,14 +20,41 @@ from .stabilize import is_file_stable, is_file_locked, wait_until_ready
 
 
 # ─────────────────────────────────────────────────────────────
-# 헬퍼: debounce 딕셔너리
+# 헬퍼: Debouncer (last-write-wins) + _DebounceMixin (first-wins)
 # ─────────────────────────────────────────────────────────────
+class Debouncer:
+    """
+    같은 key에 대해 delay 초 안에 여러 번 호출되면 마지막 것만 실행.
+    on_created / on_modified 폭풍 처리에 사용.
+    """
+    def __init__(self, delay: float = 0.5):
+        self._timers: dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+        self.delay = delay
+
+    def call(self, key: str, func, *args):
+        with self._lock:
+            existing = self._timers.get(key)
+            if existing:
+                existing.cancel()
+            t = threading.Timer(self.delay, self._run, (key, func, args))
+            t.daemon = True
+            self._timers[key] = t
+            t.start()
+
+    def _run(self, key: str, func, args):
+        with self._lock:
+            self._timers.pop(key, None)
+        func(*args)
+
+
 class _DebounceMixin:
-    """같은 경로에 대해 _debounce_sec 이내 중복 이벤트 무시."""
+    """같은 경로에 대해 _debounce_sec 이내 first-wins 중복 방지."""
     _debounce_sec: float = 2.0
 
     def _init_debounce(self):
         self._recent: dict[str, float] = {}
+        self._debouncer = Debouncer(delay=0.5)
 
     def _is_dup(self, path: str) -> bool:
         now = time.time()
@@ -277,14 +304,21 @@ class HddCopyWatcher(FileSystemEventHandler, _DebounceMixin):
         if event.is_directory:
             return
         path = event.src_path
+        # Debouncer: 500ms 안에 같은 파일 이벤트가 여러 번 오면 마지막만 처리
+        self._debouncer.call(path, self._on_new_file, path)
+
+    def on_modified(self, event):
+        """대용량 파일은 created 후 계속 modified가 발생 → debounce로 마지막만 처리."""
+        if event.is_directory:
+            return
+        path = event.src_path
+        self._debouncer.call(path, self._on_new_file, path)
+
+    def _on_new_file(self, path: str):
         if self._is_dup(path):
             return
         print(f'[HddCopyWatcher] 새 파일: {os.path.basename(path)}')
         threading.Thread(target=self._verify_and_publish, args=(path,), daemon=True).start()
-
-    def on_modified(self, event):
-        """대용량 파일은 created 후 계속 modified가 발생 — 무시 (created에서 이미 처리)."""
-        pass
 
     def _verify_and_publish(self, path: str):
         # HDD 복사는 느리므로 안정화 간격을 넉넉히 잡음

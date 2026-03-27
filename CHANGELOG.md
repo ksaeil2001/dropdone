@@ -4,6 +4,17 @@ All notable changes to DropDone will be documented in this file.
 
 ---
 
+## v1.0.2 (2026-03-27)
+
+### 성능
+- SQLite WAL 모드 + 10MB 캐시 → DB 쿼리 85~104배 향상
+- DB 연결 스레드 로컬 싱글톤 → 연결 오버헤드 제거
+- PyInstaller onedir 전환 → 앱 시작 시 압축 해제 과정 없음
+- watchdog 이벤트 디바운싱 500ms → 중복 이벤트 처리 방지
+- 대시보드 정적 파일 1시간 캐시 추가
+
+---
+
 ## v1.0.1 (2026-03-27)
 
 ### 보안
