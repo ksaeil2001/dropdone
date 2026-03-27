@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# 빌드 산출물
+build/
+dist/
+*.spec.bak
+*.egg-info/
+
+# 인스톨러 (배포 전 로컬 빌드 결과)
+installer/
+
+# 데이터베이스 (런타임 생성)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 환경 설정
+.env
+.env.*
+*.env
+
+# 가상환경
+venv/
+.venv/
+env/
+.python-version
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 테스트 임시 파일
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 로그
+*.log
+logs/
+
+# OS
+desktop.ini
+$RECYCLE.BIN/

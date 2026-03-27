@@ -1,0 +1,6 @@
+pystray
+watchdog
+psutil
+pywin32
+plyer
+pillow

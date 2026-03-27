@@ -1,0 +1,9 @@
+{
+    "name": "com.dropdone.host",
+    "description": "DropDone Native Messaging Host",
+    "path": "C:\\Users\\ksaei\\DropDone\\dropdone\\native_host\\dropdone_host_run.bat",
+    "type": "stdio",
+    "allowed_origins": [
+        "chrome-extension://jmmlnfmecgonandhhmoeanohcpmikhop/"
+    ]
+}
