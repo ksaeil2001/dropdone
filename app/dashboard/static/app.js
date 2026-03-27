@@ -1,6 +1,17 @@
+/* ── 토큰 (URL ?token= 또는 sessionStorage) ── */
+const _token = (() => {
+  const t = new URLSearchParams(window.location.search).get('token') || '';
+  if (t) sessionStorage.setItem('dd_token', t);
+  return t || sessionStorage.getItem('dd_token') || '';
+})();
+
+function _authHeaders(extra = {}) {
+  return { 'X-DropDone-Token': _token, ...extra };
+}
+
 /* ── API ── */
 async function api(path) {
-  const res = await fetch(path);
+  const res = await fetch(path, { headers: _authHeaders() });
   if (!res.ok) throw new Error(`${res.status} ${path}`);
   return res.json();
 }
@@ -274,7 +285,7 @@ async function renderSettings(el) {
 
 async function deleteRule(id) {
   if (!confirm('이 규칙을 삭제하시겠습니까?')) return;
-  await fetch(`/api/rules/${id}`, { method: 'DELETE' });
+  await fetch(`/api/rules/${id}`, { method: 'DELETE', headers: _authHeaders() });
   renderTab('rules');
 }
 
@@ -312,7 +323,7 @@ async function saveRule() {
   try {
     await fetch('/api/rules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ category: cat.id, ext_pattern: cat.exts, dest_folder: folder, action: 'move' }),
     });
     closeModal();
@@ -322,5 +333,51 @@ async function saveRule() {
   }
 }
 
+/* ── 에러 배너 ── */
+let _errorCache = [];
+
+async function checkErrors() {
+  try {
+    const errors = await api('/api/errors');
+    _errorCache = errors;
+    const banner = document.getElementById('errorBanner');
+    if (!banner) return;
+    if (errors.length > 0) {
+      document.getElementById('errorBannerText').textContent =
+        `⚠️ 파일 이동 실패 ${errors.length}건 — 자세히 보기`;
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch(e) { /* 에러 API 실패 시 배너 숨김 유지 */ }
+}
+
+function showErrorModal() {
+  const modal = document.getElementById('errorModal');
+  const list  = document.getElementById('errorList');
+  if (!modal || !list) return;
+  list.innerHTML = _errorCache.length
+    ? _errorCache.map(e => `
+        <div style="border:1px solid var(--border,#2d3148);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+          <div style="font-size:12px;color:var(--text3,#94a3b8);margin-bottom:4px;">${e.timestamp}</div>
+          <div style="font-size:13px;color:#fbbf24;margin-bottom:4px;word-break:break-all;">${e.filepath || '(경로 없음)'}</div>
+          <div style="font-size:12px;color:var(--red,#ef4444);">${e.message}</div>
+        </div>`).join('')
+    : '<div style="color:var(--text3,#94a3b8);text-align:center;padding:32px;">에러 없음</div>';
+  modal.style.display = 'flex';
+}
+
+async function clearErrorsAndHide() {
+  try {
+    await fetch('/api/errors', { method: 'DELETE', headers: _authHeaders() });
+    _errorCache = [];
+    const banner = document.getElementById('errorBanner');
+    if (banner) banner.style.display = 'none';
+    const modal = document.getElementById('errorModal');
+    if (modal) modal.style.display = 'none';
+  } catch(e) { alert('삭제 실패: ' + e.message); }
+}
+
 /* ── 초기 로드 ── */
 renderTab('active');
+checkErrors();

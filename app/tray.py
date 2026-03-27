@@ -15,11 +15,12 @@ def _create_icon_image():
 
 def build_tray(on_quit):
     def open_dashboard(icon, item):
-        base = f'http://{DASHBOARD_HOST}:{DASHBOARD_PORT}'
+        token = get_setting('api_token', '')
+        base  = f'http://{DASHBOARD_HOST}:{DASHBOARD_PORT}'
         if get_setting('onboarding_complete', 'false') == 'true':
-            webbrowser.open(base + '/')
+            webbrowser.open(f'{base}/?token={token}')
         else:
-            webbrowser.open(base + '/onboarding')
+            webbrowser.open(f'{base}/onboarding?token={token}')
 
     def quit_app(icon, item):
         icon.stop()

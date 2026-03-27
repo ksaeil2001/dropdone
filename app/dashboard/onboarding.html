@@ -423,6 +423,16 @@
     return result;
   }
 
+  /* ── 토큰 ── */
+  const _token = (() => {
+    const t = new URLSearchParams(window.location.search).get('token') || '';
+    if (t) sessionStorage.setItem('dd_token', t);
+    return t || sessionStorage.getItem('dd_token') || '';
+  })();
+  function _authHdr(extra) {
+    return Object.assign({ 'X-DropDone-Token': _token }, extra || {});
+  }
+
   function finish() {
     const payload = {
       folders:    getSelectedFolders(),
@@ -430,12 +440,15 @@
     };
     fetch('/api/onboarding/save', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _authHdr({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload),
     })
-    .then(() => fetch('/api/onboarding/complete', { method: 'POST' }))
-    .then(() => { window.location.href = '/'; })
-    .catch(() => { window.location.href = '/'; });
+    .then(() => fetch('/api/onboarding/complete', {
+      method: 'POST',
+      headers: _authHdr({ 'Content-Type': 'application/json' }),
+    }))
+    .then(() => { window.location.href = '/?token=' + _token; })
+    .catch(() => { window.location.href = '/?token=' + _token; });
   }
 </script>
 </body>

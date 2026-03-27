@@ -310,21 +310,71 @@ class FolderWatcherManager:
       'mega'     — MEGA 전용
       'hitomi'   — Hitomi 전용
       'hdd'      — 외부 HDD 복사 전용
+
+    동적 추가/제거:
+      watch_folder(folder, mode)  — Observer 실행 중 즉시 감시 시작
+      unwatch_folder(folder)      — Observer 실행 중 즉시 감시 중단
     """
 
     def __init__(self, event_bus: EventBus):
         self.event_bus = event_bus
         self._observer = Observer()
+        # folder path → 등록된 watchdog Watch 객체 목록
+        self._watches: dict[str, list] = {}
+
+    def _schedule(self, folder: str, mode: str) -> list:
+        """핸들러를 Observer에 등록하고 Watch 객체 목록 반환."""
+        watches = []
+        try:
+            if mode in ('all', 'browser'):
+                watches.append(
+                    self._observer.schedule(BrowserWatcher(self.event_bus), folder, recursive=False)
+                )
+            if mode in ('all', 'mega'):
+                watches.append(
+                    self._observer.schedule(MegaWatcher(self.event_bus), folder, recursive=False)
+                )
+            if mode in ('all', 'hitomi'):
+                watches.append(
+                    self._observer.schedule(HitomiWatcher(self.event_bus), folder, recursive=False)
+                )
+            if mode == 'hdd':
+                watches.append(
+                    self._observer.schedule(HddCopyWatcher(self.event_bus), folder, recursive=False)
+                )
+        except Exception as e:
+            print(f'[Watcher] schedule 오류 ({folder}): {e}')
+        return watches
 
     def watch(self, folder: str, mode: str = 'all'):
-        if mode in ('all', 'browser'):
-            self._observer.schedule(BrowserWatcher(self.event_bus), folder, recursive=False)
-        if mode in ('all', 'mega'):
-            self._observer.schedule(MegaWatcher(self.event_bus), folder, recursive=False)
-        if mode in ('all', 'hitomi'):
-            self._observer.schedule(HitomiWatcher(self.event_bus), folder, recursive=False)
-        if mode == 'hdd':
-            self._observer.schedule(HddCopyWatcher(self.event_bus), folder, recursive=False)
+        """초기 설정. start() 전후 모두 호출 가능."""
+        if folder in self._watches:
+            return  # 중복 방지
+        watches = self._schedule(folder, mode)
+        self._watches[folder] = watches
+
+    def watch_folder(self, folder: str, mode: str = 'all'):
+        """Observer 실행 중 동적으로 감시 폴더 추가."""
+        if folder in self._watches:
+            print(f'[Watcher] 이미 감시 중: {folder}')
+            return
+        if not os.path.isdir(folder):
+            print(f'[Watcher] 폴더 없음: {folder}')
+            return
+        watches = self._schedule(folder, mode)
+        self._watches[folder] = watches
+        print(f'[Watcher] 감시 추가: {folder} (mode={mode})')
+
+    def unwatch_folder(self, folder: str):
+        """Observer 실행 중 동적으로 감시 폴더 제거."""
+        watches = self._watches.pop(folder, [])
+        for w in watches:
+            try:
+                self._observer.unschedule(w)
+            except Exception:
+                pass
+        if watches:
+            print(f'[Watcher] 감시 제거: {folder}')
 
     def start(self):
         self._observer.start()

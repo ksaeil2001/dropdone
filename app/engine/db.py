@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import sys
+import secrets
 
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -60,7 +61,22 @@ def init_db():
             INSERT OR IGNORE INTO settings VALUES ('plan', 'free');
             INSERT OR IGNORE INTO settings VALUES ('onboarding_complete', 'false');
             INSERT OR IGNORE INTO settings VALUES ('notifications_enabled', 'true');
+
+            CREATE TABLE IF NOT EXISTS errors (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT DEFAULT (datetime('now','localtime')),
+                source    TEXT,
+                message   TEXT,
+                filepath  TEXT
+            );
         """)
+        # api_token: 앱 첫 실행 시 1회 생성, 이후 재사용
+        row = conn.execute("SELECT value FROM settings WHERE key='api_token'").fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO settings(key, value) VALUES('api_token', ?)",
+                (secrets.token_hex(32),),
+            )
 
 
 def insert_download(event: dict):
@@ -92,6 +108,27 @@ def get_setting(key: str, default: str = '') -> str:
     with get_conn() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     return row['value'] if row else default
+
+
+def insert_error(source: str, message: str, filepath: str = ''):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO errors (source, message, filepath) VALUES (?,?,?)",
+            (source, message, filepath),
+        )
+
+
+def get_errors(limit: int = 20) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM errors ORDER BY timestamp DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def clear_errors():
+    with get_conn() as conn:
+        conn.execute("DELETE FROM errors")
 
 
 def set_setting(key: str, value: str):

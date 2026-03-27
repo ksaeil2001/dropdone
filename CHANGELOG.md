@@ -4,6 +4,25 @@ All notable changes to DropDone will be documented in this file.
 
 ---
 
+## v1.0.1 (2026-03-27)
+
+### 보안
+- 로컬 API 토큰 인증 추가 (`X-DropDone-Token` 헤더, `hmac.compare_digest` 검증)
+- 경로 트래버설 공격 방지 (`is_safe_path` 검증)
+- 서버 바인딩 `127.0.0.1` 고정 확인
+
+### 안정성
+- 앱 크래시 자동 재시작 (최대 5회, 3초 간격)
+- 감시 폴더 추가/삭제 즉시 반영 (재시작 불필요)
+- 무한 루프 감지 (목적지가 감시 폴더 하위일 때 skip)
+- 파일 충돌 시 자동 번호 붙이기 (`movie.mkv` → `movie(1).mkv`)
+- 파일 이동 실패 에러 DB 기록 + 대시보드 배너 표시
+
+### 수정
+- SQL 인젝션 방지 (전체 `?` 파라미터 바인딩 확인)
+
+---
+
 ## [v1.0.0] - 2026-03-27
 
 ### Added
