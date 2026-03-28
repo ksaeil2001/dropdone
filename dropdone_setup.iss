@@ -91,6 +91,7 @@ Filename: "taskkill.exe"; Parameters: "/F /IM {#MyAppExeName}"; Flags: runhidden
 [UninstallDelete]
 ; 언인스톨 시 데이터 파일 삭제
 Type: filesandordirs; Name: "{localappdata}\DropDone"
+Type: filesandordirs; Name: "{app}"
 
 [Code]
 // 설치 전: 기존 프로세스 종료

@@ -326,7 +326,12 @@ def register_watcher(watcher) -> None:
 
 
 def start_server():
-    server = HTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)
+    try:
+        server = HTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)
+    except OSError as e:
+        raise RuntimeError(
+            f'대시보드 서버를 시작할 수 없습니다 ({DASHBOARD_HOST}:{DASHBOARD_PORT}): {e}'
+        ) from e
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     print(f'[Dashboard] http://{DASHBOARD_HOST}:{DASHBOARD_PORT}')

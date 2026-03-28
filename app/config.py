@@ -1,14 +1,8 @@
 import os
-import sys
 
-# PyInstaller exe 환경에서는 실행 파일 옆에 data/ 폴더 생성
-if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-DB_PATH = os.path.join(DATA_DIR, 'dropdone.db')
+DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'DropDone')
+DB_PATH  = os.path.join(DATA_DIR, 'dropdone.db')
+LOG_DIR  = os.path.join(DATA_DIR, 'logs')
 
 DASHBOARD_HOST = '127.0.0.1'
 DASHBOARD_PORT = 7878

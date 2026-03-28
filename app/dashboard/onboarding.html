@@ -264,7 +264,7 @@
     <p class="subtitle">다운로드가 완료되면 여기서 파일을 감지합니다.</p>
 
     <div class="folder-list">
-      <label class="folder-card selected" onclick="toggleCard(this)">
+      <label class="folder-card selected" onclick="toggleCard(event, this)">
         <input type="checkbox" checked>
         <span class="folder-icon">⬇️</span>
         <div class="folder-info">
@@ -274,7 +274,7 @@
         <div class="check-circle">✓</div>
       </label>
 
-      <label class="folder-card" onclick="toggleCard(this)">
+      <label class="folder-card" onclick="toggleCard(event, this)">
         <input type="checkbox">
         <span class="folder-icon">🖥️</span>
         <div class="folder-info">
@@ -284,7 +284,7 @@
         <div class="check-circle">✓</div>
       </label>
 
-      <label class="folder-card" onclick="toggleCard(this)">
+      <label class="folder-card" onclick="toggleCard(event, this)">
         <input type="checkbox">
         <span class="folder-icon">📁</span>
         <div class="folder-info">
@@ -396,7 +396,8 @@
     window.scrollTo(0, 0);
   }
 
-  function toggleCard(el) {
+  function toggleCard(e, el) {
+    e.preventDefault();
     el.classList.toggle('selected');
     el.querySelector('input').checked = el.classList.contains('selected');
   }

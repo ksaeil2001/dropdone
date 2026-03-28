@@ -4,14 +4,35 @@ import time
 import logging
 import traceback
 
-# 패키지 루트를 sys.path에 추가
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S',
-)
+def _acquire_single_instance():
+    """두 번째 인스턴스 실행 시 즉시 종료."""
+    try:
+        import win32event, win32api, winerror
+        mutex = win32event.CreateMutex(None, False, 'DropDone_SingleInstance')
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            sys.exit(0)
+    except Exception:
+        pass  # pywin32 없는 환경에서는 무시
+
+
+def _setup_logging():
+    from app.config import LOG_DIR
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_file = os.path.join(LOG_DIR, 'dropdone.log')
+    handlers = [
+        logging.StreamHandler(),
+        logging.FileHandler(log_file, encoding='utf-8'),
+    ]
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%H:%M:%S',
+        handlers=handlers,
+    )
+
+
+_setup_logging()
 
 from app.engine.db import init_db, insert_download, insert_error
 from app.engine.rules import apply_rules
@@ -60,6 +81,7 @@ MAX_RETRIES  = 5
 RETRY_DELAY  = 3  # 초
 
 if __name__ == '__main__':
+    _acquire_single_instance()
     retries = 0
     while retries < MAX_RETRIES:
         try:
