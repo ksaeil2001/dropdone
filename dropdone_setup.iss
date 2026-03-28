@@ -3,7 +3,7 @@
 ; 전제조건: dist\DropDone.exe 빌드 완료 상태
 
 #define MyAppName "DropDone"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "DropDone"
 #define MyAppURL "https://github.com/ksaeil2001/dropdone"
 #define MyAppExeName "DropDone.exe"
