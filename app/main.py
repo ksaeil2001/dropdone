@@ -1,23 +1,61 @@
-import sys
-import os
-import time
 import logging
+import os
+import sys
+import time
 import traceback
 
+if '--native-host' in sys.argv:
+    from app.native_host_runtime import run_native_host
 
-def _acquire_single_instance():
-    """두 번째 인스턴스 실행 시 즉시 종료."""
+    run_native_host()
+    sys.exit(0)
+
+
+SINGLE_INSTANCE_MUTEX_NAME = 'DropDone_SingleInstance'
+_single_instance_mutex = None
+
+
+def _acquire_single_instance(mutex_name: str = SINGLE_INSTANCE_MUTEX_NAME) -> bool:
+    global _single_instance_mutex
+
     try:
-        import win32event, win32api, winerror
-        mutex = win32event.CreateMutex(None, False, 'DropDone_SingleInstance')
+        import win32api
+        import win32event
+        import winerror
+
+        mutex = win32event.CreateMutex(None, False, mutex_name)
         if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-            sys.exit(0)
+            return False
+
+        _single_instance_mutex = mutex
+        return True
     except Exception:
-        pass  # pywin32 없는 환경에서는 무시
+        return True
+
+
+def _release_single_instance():
+    global _single_instance_mutex
+
+    if _single_instance_mutex is None:
+        return
+
+    try:
+        close_handle = getattr(_single_instance_mutex, 'Close', None)
+        if callable(close_handle):
+            close_handle()
+        else:
+            import win32api
+
+            win32api.CloseHandle(_single_instance_mutex)
+    except Exception:
+        pass
+    finally:
+        _single_instance_mutex = None
 
 
 def _setup_logging():
     from app.config import LOG_DIR
+
     os.makedirs(LOG_DIR, exist_ok=True)
     log_file = os.path.join(LOG_DIR, 'dropdone.log')
     handlers = [
@@ -34,25 +72,51 @@ def _setup_logging():
 
 _setup_logging()
 
-from app.engine.db import init_db, insert_download, insert_error
-from app.engine.rules import apply_rules
-from app.dashboard.server import start_server, register_watcher
-from app.detector.event_bus import EventBus
-from app.detector.chrome import ChromeDetector
-from app.detector.folder_watcher import FolderWatcherManager
-from app.tray import build_tray
 from app import notify
+from app.dashboard.server import register_event_bus, register_watcher, start_server
+from app.detector.chrome import ChromeDetector
+from app.detector.event_bus import EventBus
+from app.detector.folder_watcher import FolderWatcherManager
+from app.engine.classifier import classify_download
+from app.engine.db import (
+    get_watch_targets,
+    init_db,
+    insert_download,
+    insert_error,
+    update_download_result,
+)
+from app.engine.rules import apply_rules
+from app.tray import build_tray
 
 
 def on_download_complete(event: dict):
-    insert_download(event)
-    notify.show('다운로드 완료', event['filename'])
-    apply_rules(event)
+    classified_event = classify_download(event)
+    insert_download(classified_event)
+    notify.show('Download complete', classified_event['filename'])
+    moved = apply_rules(classified_event)
+    if moved:
+        update_download_result(classified_event.get('id', ''), moved)
+
+
+def _restore_watch_targets(watcher: FolderWatcherManager):
+    targets = get_watch_targets()
+    if not targets:
+        downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+        watcher.watch(downloads_dir, mode='all')
+        return
+
+    for target in reversed(targets):
+        folder = target.get('path', '')
+        mode = target.get('mode', 'all') or 'all'
+        if not folder or not os.path.isdir(folder):
+            logging.warning('[Watcher] restore skipped: %s (mode=%s)', folder, mode)
+            continue
+        watcher.watch(folder, mode=mode)
 
 
 def main():
     init_db()
-    start_server()
+    server = start_server()
 
     bus = EventBus()
     bus.subscribe(on_download_complete)
@@ -61,46 +125,55 @@ def main():
     chrome.start()
 
     watcher = FolderWatcherManager(bus)
-    downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
-    watcher.watch(downloads_dir, mode='all')
+    _restore_watch_targets(watcher)
     watcher.start()
 
-    # 서버 핸들러에 watcher 등록 — /api/watch-targets 동적 추가/제거에 사용
     register_watcher(watcher)
+    register_event_bus(bus)
 
     def on_quit():
+        chrome.stop()
         watcher.stop()
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            pass
+        _release_single_instance()
         sys.exit(0)
 
     tray = build_tray(on_quit)
     tray.run(setup=tray._setup)
 
 
-# ── 크래시 자동 재시작 루프 ─────────────────────────────────
-MAX_RETRIES  = 5
-RETRY_DELAY  = 3  # 초
+MAX_RETRIES = 5
+RETRY_DELAY = 3
 
 if __name__ == '__main__':
-    _acquire_single_instance()
+    if not _acquire_single_instance():
+        sys.exit(0)
+
     retries = 0
     while retries < MAX_RETRIES:
         try:
             main()
-            break  # 정상 종료 (tray "종료" 버튼 → sys.exit → SystemExit)
+            break
         except SystemExit:
             break
         except KeyboardInterrupt:
             break
-        except Exception as e:
+        except Exception as error:
             retries += 1
-            logging.error(f'앱 크래시 (시도 {retries}/{MAX_RETRIES}): {e}')
+            logging.error('main loop crashed (%s/%s): %s', retries, MAX_RETRIES, error)
             logging.error(traceback.format_exc())
             try:
-                insert_error('main', f'크래시: {e}', '')
+                insert_error('main', f'crash: {error}', '')
             except Exception:
                 pass
             if retries < MAX_RETRIES:
-                logging.info(f'{RETRY_DELAY}초 후 재시작...')
+                logging.info('retrying in %s seconds', RETRY_DELAY)
                 time.sleep(RETRY_DELAY)
             else:
-                logging.critical('최대 재시도 횟수 초과. 앱을 종료합니다.')
+                logging.critical('max retries exceeded, shutting down')
+
+    _release_single_instance()

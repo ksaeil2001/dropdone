@@ -1,38 +1,66 @@
 import json
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
+
 from .event_bus import EventBus
 
-# Native Messaging 호스트로부터 메시지를 수신하는 TCP 소켓 서버
-# dropdone_host.py가 메시지를 이 포트로 포워딩합니다.
+
 NATIVE_BRIDGE_PORT = 17878
 
 
 class ChromeDetector:
-    def __init__(self, event_bus: EventBus):
+    def __init__(self, event_bus: EventBus, port: int | None = None):
         self.event_bus = event_bus
+        self._port = port if port is not None else NATIVE_BRIDGE_PORT
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='chrome-detector')
+        self._listen_socket: socket.socket | None = None
+        self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._listen, daemon=True)
 
     def start(self):
         self._thread.start()
 
-    def _listen(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            srv.bind(('127.0.0.1', NATIVE_BRIDGE_PORT))
-            srv.listen()
-            while True:
-                conn, _ = srv.accept()
-                threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+    def stop(self):
+        self._stop_event.set()
+        if self._listen_socket is not None:
+            try:
+                self._listen_socket.close()
+            except OSError:
+                pass
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def _handle(self, conn):
-        with conn:
-            data = b''
-            while chunk := conn.recv(4096):
-                data += chunk
-            if data:
+    def _listen(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            self._listen_socket = server
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(('127.0.0.1', self._port))
+            server.listen(8)
+
+            while not self._stop_event.is_set():
                 try:
-                    msg = json.loads(data.decode('utf-8'))
-                    self.event_bus.publish(msg)
-                except Exception as e:
-                    print(f'[ChromeDetector] parse error: {e}')
+                    server.settimeout(1.0)
+                    conn, _ = server.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                self._executor.submit(self._handle, conn)
+
+    def _handle(self, conn: socket.socket) -> None:
+        with conn:
+            chunks = []
+            try:
+                while chunk := conn.recv(4096):
+                    chunks.append(chunk)
+            except OSError:
+                pass
+            data = b''.join(chunks)
+            if not data:
+                return
+            try:
+                msg = json.loads(data.decode('utf-8'))
+                self.event_bus.publish(msg)
+            except Exception as exc:
+                import logging
+                logging.warning('[ChromeDetector] parse error: %s', exc)

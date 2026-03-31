@@ -61,7 +61,7 @@ bus.subscribe(on_event)
 
 # ── FolderWatcher 시작 ───────────────────────────────────────
 mgr = FolderWatcherManager(bus)
-mgr.watch(WATCH_DIR, mode='both')
+mgr.watch(WATCH_DIR, mode='all')
 mgr.start()
 print(f'[WATCHER] 감시 시작...')
 time.sleep(0.5)
@@ -83,7 +83,7 @@ time.sleep(0.3)
 # .mega 삭제 → MEGA 완료 감지 트리거
 os.remove(mega_file)
 print(f'[TEST] 삭제: {mega_file}')
-time.sleep(1.5)  # watchdog 이벤트 대기
+time.sleep(2.5)  # watchdog + 안정화 대기
 
 # ── 테스트 2: tmp 패턴 감지 ──────────────────────────────────
 print('\n===== TEST 2: TMP 패턴 감지 =====')
@@ -97,7 +97,7 @@ time.sleep(0.3)
 
 os.rename(tmp_src, tmp_dest)
 print(f'[TEST] 이름 변경: {tmp_src} → {tmp_dest}')
-time.sleep(1.5)
+time.sleep(2.5)
 
 # ── 결과 검증 ────────────────────────────────────────────────
 mgr.stop()
@@ -124,8 +124,8 @@ shutil.rmtree(DEST_DIR, ignore_errors=True)
 print('\n[CLEANUP] 테스트 폴더 삭제')
 
 if len(received_events) >= 2:
-    print('\n✅ 통합 테스트 PASS')
+    print('\n[PASS] integration test')
 elif len(received_events) >= 1:
-    print('\n⚠️  이벤트 1개만 수신 (부분 성공)')
+    print('\n[WARN] only one event received')
 else:
-    print('\n❌ 이벤트 수신 없음 - FAIL')
+    print('\n[FAIL] no events received')

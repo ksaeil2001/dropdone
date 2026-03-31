@@ -3,19 +3,37 @@ import json
 import os
 import sys
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from app.config import DASHBOARD_HOST, DASHBOARD_PORT
-from app.engine.db import get_downloads, get_rules, get_setting, set_setting, get_errors, clear_errors
+from app.config import (
+    CATEGORY_DEFINITIONS,
+    CATEGORY_LABEL_TO_KEY,
+    DASHBOARD_HOST,
+    DASHBOARD_PORT,
+    FREE_PLAN_MAX_RULES,
+    MANUAL_CATEGORY_KEYS,
+    default_organize_base_dir,
+)
+from app.engine.db import (
+    clear_errors,
+    count_rules,
+    find_manual_rule_by_category,
+    get_conn,
+    get_downloads,
+    get_errors,
+    get_rules,
+    get_setting,
+    get_watch_targets,
+    set_setting,
+)
+from app.engine.rules import category_to_ext_pattern, ensure_template_rules
 
 
-# ── 경로 트래버설 방지 ────────────────────────────────────────
 def is_safe_path(path: str) -> bool:
-    """절대 경로로 변환 후 시스템 보호 경로 차단."""
     resolved = os.path.realpath(os.path.abspath(path))
     blocked = [
         r'C:\Windows',
@@ -25,26 +43,104 @@ def is_safe_path(path: str) -> bool:
         os.environ.get('ProgramFiles', r'C:\Program Files'),
         os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'),
     ]
-    for b in blocked:
-        if b and resolved.lower().startswith(b.lower()):
+    for blocked_path in blocked:
+        if blocked_path and resolved.lower().startswith(blocked_path.lower()):
             return False
     return True
 
 
+def normalize_category_key(value: str) -> str:
+    raw = (value or '').strip()
+    if raw in CATEGORY_DEFINITIONS:
+        return raw
+    return CATEGORY_LABEL_TO_KEY.get(raw, '')
+
+
+def upsert_watch_target(path: str, mode: str = 'all') -> None:
+    with get_conn() as conn:
+        exists = conn.execute(
+            'SELECT id, mode FROM watch_targets WHERE path=?',
+            (path,),
+        ).fetchone()
+        if not exists:
+            conn.execute(
+                "INSERT INTO watch_targets (path, mode, total_count, action) VALUES (?, ?, 0, 'watch')",
+                (path, mode),
+            )
+        elif exists['mode'] != mode:
+            conn.execute(
+                'UPDATE watch_targets SET mode=? WHERE id=?',
+                (mode, exists['id']),
+            )
+        conn.commit()
+
+
+def configure_organize_base_dir(base_dir: str) -> str:
+    normalized_base_dir = os.path.realpath(os.path.abspath(base_dir))
+    if not is_safe_path(normalized_base_dir):
+        raise ValueError('허용되지 않는 경로입니다.')
+    set_setting('organize_base_dir', normalized_base_dir)
+    ensure_template_rules(normalized_base_dir)
+    return normalized_base_dir
+
+
+def save_onboarding_config(body: dict, watcher=None) -> dict:
+    home = os.path.expanduser('~')
+    folder_map = {
+        'Downloads': os.path.join(home, 'Downloads'),
+        'Desktop': os.path.join(home, 'Desktop'),
+    }
+
+    folders = body.get('folders', [])
+    base_dir = body.get('base_dir') or get_setting('organize_base_dir', default_organize_base_dir())
+    normalized_base_dir = configure_organize_base_dir(base_dir)
+
+    watch_paths = []
+    for key in folders:
+        watch_path = folder_map.get(key)
+        if not watch_path or not is_safe_path(watch_path):
+            continue
+        os.makedirs(watch_path, exist_ok=True)
+        upsert_watch_target(watch_path, mode='all')
+        watch_paths.append(watch_path)
+
+    if watcher:
+        for watch_path in watch_paths:
+            watcher.watch_folder(watch_path, mode='all')
+
+    return {
+        'ok': True,
+        'organize_base_dir': normalized_base_dir,
+        'watch_paths': watch_paths,
+    }
+
+
+def ensure_unique_manual_rule_category(category_key: str, exclude_rule_id: int | None = None):
+    conflict = find_manual_rule_by_category(category_key, exclude_rule_id=exclude_rule_id)
+    if conflict:
+        raise ValueError('해당 카테고리에는 수동 규칙을 하나만 만들 수 있습니다.')
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    # 인증 불필요 GET 경로
-    _AUTH_EXEMPT_GET = {'/', '/index.html', '/onboarding', '/onboarding.html',
-                        '/style.css', '/app.js'}
+    _VALID_WATCH_MODES = {'all', 'browser', 'mega', 'hitomi', 'hdd'}
+    _AUTH_EXEMPT_GET = {'/', '/index.html', '/onboarding', '/onboarding.html', '/style.css', '/app.js', '/api/events'}
+    event_bus = None
+    watcher = None
 
     def log_message(self, format, *args):
-        pass  # 콘솔 로그 억제
+        pass
 
-    # ── 인증 ────────────────────────────────────────────────────
     def _check_auth(self) -> bool:
-        """X-DropDone-Token 헤더 또는 ?token= 쿼리파라미터 검증. 실패 시 403 반환."""
         stored = get_setting('api_token', '')
         if not stored:
-            return True  # 토큰 미생성 환경 방어 (init_db 실패 등)
+            return True
+
+        if (
+            self.command == 'GET'
+            and self.client_address[0] == '127.0.0.1'
+            and get_setting('onboarding_complete', '') == 'true'
+        ):
+            return True
 
         req_token = self.headers.get('X-DropDone-Token', '')
         if not req_token:
@@ -56,7 +152,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return False
         return True
 
-    # ── 응답 헬퍼 ────────────────────────────────────────────────
+    def _read_json(self) -> dict:
+        length = int(self.headers.get('Content-Length', 0))
+        if not length:
+            return {}
+        return json.loads(self.rfile.read(length).decode('utf-8'))
+
     def _send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
@@ -68,12 +169,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _send_file(self, path: str, content_type: str):
         try:
-            with open(path, 'rb') as f:
-                body = f.read()
+            with open(path, 'rb') as handle:
+                body = handle.read()
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', len(body))
-            # JS/CSS/아이콘은 1시간 캐시, HTML은 no-cache (항상 최신)
             if path.endswith(('.js', '.css', '.ico', '.png')):
                 self.send_header('Cache-Control', 'max-age=3600')
             else:
@@ -82,271 +182,343 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except FileNotFoundError:
             self.send_error(404)
+        except (ConnectionAbortedError, BrokenPipeError):
+            pass
 
-    # ── GET ─────────────────────────────────────────────────────
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        static_dir   = os.path.join(os.path.dirname(__file__), 'static')
+        static_dir = os.path.join(os.path.dirname(__file__), 'static')
         dashboard_dir = os.path.dirname(__file__)
 
-        # 정적 파일은 인증 불필요
-        if path not in self._AUTH_EXEMPT_GET:
-            if not self._check_auth():
-                return
+        if path not in self._AUTH_EXEMPT_GET and not self._check_auth():
+            return
 
         if path in ('/onboarding', '/onboarding.html'):
             self._send_file(os.path.join(dashboard_dir, 'onboarding.html'), 'text/html; charset=utf-8')
-        elif path in ('/', '/index.html'):
+            return
+        if path in ('/', '/index.html'):
             self._send_file(os.path.join(static_dir, 'index.html'), 'text/html; charset=utf-8')
-        elif path == '/style.css':
+            return
+        if path == '/style.css':
             self._send_file(os.path.join(static_dir, 'style.css'), 'text/css')
-        elif path == '/app.js':
+            return
+        if path == '/app.js':
             self._send_file(os.path.join(static_dir, 'app.js'), 'application/javascript')
-        elif path == '/api/downloads':
+            return
+        if path == '/api/downloads':
             self._send_json(get_downloads())
-        elif path == '/api/rules':
+            return
+        if path == '/api/rules':
             self._send_json(get_rules())
-        elif path == '/api/settings':
-            self._send_json({
-                'countdown_seconds': get_setting('countdown_seconds', '60'),
-                'shutdown_action':   get_setting('shutdown_action', 'shutdown'),
-                'plan':              get_setting('plan', 'free'),
-            })
-        elif path == '/api/errors':
+            return
+        if path == '/api/settings':
+            self._send_json(
+                {
+                    'countdown_seconds': get_setting('countdown_seconds', '60'),
+                    'shutdown_action': get_setting('shutdown_action', 'shutdown'),
+                    'plan': get_setting('plan', 'free'),
+                    'organize_base_dir': get_setting('organize_base_dir', default_organize_base_dir()),
+                    'manual_rule_count': count_rules('manual'),
+                    'template_rule_count': count_rules('template'),
+                }
+            )
+            return
+        if path == '/api/errors':
             self._send_json(get_errors())
-        elif path == '/api/watch-targets':
-            from app.engine.db import get_conn
-            with get_conn() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM watch_targets ORDER BY created_at DESC"
-                ).fetchall()
-            self._send_json([dict(r) for r in rows])
-        else:
-            self.send_error(404)
+            return
+        if path == '/api/watch-targets':
+            self._send_json(get_watch_targets())
+            return
+        if path == '/api/events':
+            import queue as _queue
 
-    # ── POST ────────────────────────────────────────────────────
+            client_queue = _queue.Queue(maxsize=10)
+            bus = DashboardHandler.event_bus
+            if bus:
+                bus.add_sse_client(client_queue)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                while True:
+                    try:
+                        client_queue.get(timeout=25)
+                        self.wfile.write(b'data: download\n\n')
+                        self.wfile.flush()
+                    except _queue.Empty:
+                        self.wfile.write(b': ping\n\n')
+                        self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                if bus:
+                    bus.remove_sse_client(client_queue)
+            return
+
+        self.send_error(404)
+
     def do_POST(self):
         if not self._check_auth():
             return
 
         parsed = urlparse(self.path)
-        path   = parsed.path
-        length = int(self.headers.get('Content-Length', 0))
-        body   = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
+        path = parsed.path
+        body = self._read_json()
 
         if path == '/api/watch-targets':
-            folder = body.get('path', '').strip()
+            folder = (body.get('path') or '').strip()
+            mode = (body.get('mode') or 'all').strip().lower()
             if not folder or not is_safe_path(folder):
                 self._send_json({'error': '유효하지 않은 경로'}, 400)
                 return
+            if mode not in self._VALID_WATCH_MODES:
+                self._send_json({'error': '유효하지 않은 감시 모드'}, 400)
+                return
             os.makedirs(folder, exist_ok=True)
-            from app.engine.db import get_conn
-            with get_conn() as conn:
-                exists = conn.execute(
-                    "SELECT id FROM watch_targets WHERE path=?", (folder,)
-                ).fetchone()
-                if not exists:
-                    conn.execute(
-                        "INSERT INTO watch_targets (path, total_count, action) VALUES (?,0,'watch')",
-                        (folder,),
-                    )
-            # Observer에 즉시 반영
-            watcher = getattr(DashboardHandler, 'watcher', None)
+            upsert_watch_target(folder, mode)
+            watcher = DashboardHandler.watcher
             if watcher:
-                watcher.watch_folder(folder, mode='all')
+                watcher.unwatch_folder(folder)
+                watcher.watch_folder(folder, mode=mode)
             self._send_json({'ok': True})
-        elif path == '/api/onboarding/save':
-            self._handle_onboarding_save(body)
-        elif path == '/api/onboarding/complete':
+            return
+
+        if path == '/api/onboarding/save':
+            try:
+                result = save_onboarding_config(body, watcher=DashboardHandler.watcher)
+            except ValueError as error:
+                self._send_json({'error': str(error)}, 400)
+                return
+            self._send_json(result)
+            return
+
+        if path == '/api/onboarding/complete':
             set_setting('onboarding_complete', 'true')
             self._send_json({'ok': True})
-        elif path == '/api/settings/notifications':
+            return
+
+        if path == '/api/settings/notifications':
             enabled = body.get('enabled', True)
             set_setting('notifications_enabled', 'true' if enabled else 'false')
             self._send_json({'ok': True})
-        elif path == '/api/rules':
-            from app.engine.db import get_conn
-            from app.config import FREE_PLAN_MAX_RULES
-            plan  = get_setting('plan', 'free')
-            rules = get_rules()
-            if plan == 'free' and len(rules) >= FREE_PLAN_MAX_RULES:
-                self._send_json({'error': '무료 플랜은 최대 3개까지 가능합니다'}, 403)
+            return
+
+        if path == '/api/settings/organize-base-dir':
+            base_dir = (body.get('organize_base_dir') or '').strip()
+            if not base_dir:
+                self._send_json({'error': '기본 폴더 경로를 입력하세요.'}, 400)
                 return
-            dest = body.get('dest_folder', '')
-            if not is_safe_path(dest):
-                self._send_json({'error': '허용되지 않는 경로입니다'}, 400)
+            try:
+                normalized_base_dir = configure_organize_base_dir(base_dir)
+            except ValueError as error:
+                self._send_json({'error': str(error)}, 400)
                 return
+            self._send_json({'ok': True, 'organize_base_dir': normalized_base_dir})
+            return
+
+        if path == '/api/template-rules/rebuild':
+            try:
+                normalized_base_dir = configure_organize_base_dir(
+                    get_setting('organize_base_dir', default_organize_base_dir())
+                )
+            except ValueError as error:
+                self._send_json({'error': str(error)}, 400)
+                return
+            self._send_json({'ok': True, 'organize_base_dir': normalized_base_dir})
+            return
+
+        if path == '/api/rules':
+            plan = get_setting('plan', 'free')
+            if plan == 'free' and count_rules('manual') >= FREE_PLAN_MAX_RULES:
+                self._send_json({'error': '무료 플랜은 수동 규칙을 최대 3개까지 지원합니다.'}, 403)
+                return
+
+            category_key = normalize_category_key(body.get('category_key') or body.get('category'))
+            category = (body.get('category') or '').strip()
+            ext_pattern = (body.get('ext_pattern') or '').strip()
+            dest_folder = (body.get('dest_folder') or '').strip()
+
+            if not category_key:
+                self._send_json({'error': '유효하지 않은 카테고리입니다.'}, 400)
+                return
+            if category_key not in MANUAL_CATEGORY_KEYS:
+                self._send_json({'error': '수동 규칙에서 지원하지 않는 카테고리입니다.'}, 400)
+                return
+            if not dest_folder or not is_safe_path(dest_folder):
+                self._send_json({'error': '허용되지 않는 경로입니다.'}, 400)
+                return
+            try:
+                ensure_unique_manual_rule_category(category_key)
+            except ValueError as error:
+                self._send_json({'error': str(error)}, 409)
+                return
+
+            os.makedirs(dest_folder, exist_ok=True)
+            if not ext_pattern:
+                ext_pattern = category_to_ext_pattern(category_key)
+
             with get_conn() as conn:
                 conn.execute(
-                    'INSERT INTO rules (category, ext_pattern, dest_folder, action, enabled, priority) '
-                    'VALUES (?,?,?,?,1,0)',
-                    (body.get('category', ''), body.get('ext_pattern', ''),
-                     dest, body.get('action', 'move')),
+                    """
+                    INSERT INTO rules (
+                        category, category_key, ext_pattern, dest_folder,
+                        action, enabled, priority, rule_kind
+                    ) VALUES (?, ?, ?, ?, ?, 1, 0, 'manual')
+                    """,
+                    (
+                        category or CATEGORY_DEFINITIONS[category_key]['label'],
+                        category_key,
+                        ext_pattern,
+                        dest_folder,
+                        body.get('action', 'move'),
+                    ),
                 )
+                conn.commit()
+
             self._send_json({'ok': True})
-        else:
-            self.send_error(404)
+            return
 
-    # ── 카테고리 → (ext_pattern, 대상 서브폴더명) ──────────────
-    _CATEGORY_RULES = {
-        '영상':    ('.mp4 .mkv .avi .mov .wmv .flv',   '영상'),
-        '음악':    ('.mp3 .flac .wav .aac .ogg',        '음악'),
-        '문서':    ('.pdf .docx .xlsx .pptx .txt',      '문서'),
-        '압축':    ('.zip .rar .7z .tar .gz',           '압축'),
-        '이미지':  ('.jpg .jpeg .png .gif .webp .bmp', '이미지'),
-        '실행파일': ('.exe .msi .dmg',                  '설치파일'),
-    }
+        self.send_error(404)
 
-    def _handle_onboarding_save(self, body: dict):
-        from app.engine.db import get_conn
-
-        home      = os.path.expanduser('~')
-        downloads = os.path.join(home, 'Downloads')
-
-        folder_map = {
-            'Downloads': downloads,
-            'Desktop':   os.path.join(home, 'Desktop'),
-        }
-
-        folders    = body.get('folders', [])
-        categories = body.get('categories', [])
-
-        with get_conn() as conn:
-            for key in folders:
-                path = folder_map.get(key)
-                if not path:
-                    continue
-                os.makedirs(path, exist_ok=True)
-                exists = conn.execute(
-                    "SELECT id FROM watch_targets WHERE path=?", (path,)
-                ).fetchone()
-                if not exists:
-                    conn.execute(
-                        "INSERT INTO watch_targets (path, total_count, action) VALUES (?,0,'watch')",
-                        (path,),
-                    )
-
-            for cat in categories:
-                if cat not in self._CATEGORY_RULES:
-                    continue
-                ext_pattern, subfolder = self._CATEGORY_RULES[cat]
-                dest = os.path.join(downloads, subfolder)
-                # 경로 트래버설 방지
-                if not is_safe_path(dest):
-                    continue
-                os.makedirs(dest, exist_ok=True)
-                exists = conn.execute(
-                    "SELECT id FROM rules WHERE category=?", (cat,)
-                ).fetchone()
-                if not exists:
-                    conn.execute(
-                        "INSERT INTO rules (category, ext_pattern, dest_folder, action, enabled, priority)"
-                        " VALUES (?,?,?,?,1,0)",
-                        (cat, ext_pattern, dest, 'move'),
-                    )
-
-        self._send_json({'ok': True})
-
-    # ── DELETE ──────────────────────────────────────────────────
     def do_DELETE(self):
         if not self._check_auth():
             return
 
         parsed = urlparse(self.path)
-        path   = parsed.path
+        path = parsed.path
 
         if path == '/api/errors':
             clear_errors()
             self._send_json({'ok': True})
-        elif path.startswith('/api/watch-targets/'):
+            return
+
+        if path.startswith('/api/watch-targets/'):
             target_id = path.split('/')[-1]
             if not target_id.isdigit():
                 self.send_error(400)
                 return
-            from app.engine.db import get_conn
             with get_conn() as conn:
                 row = conn.execute(
-                    "SELECT path FROM watch_targets WHERE id=?", (int(target_id),)
+                    'SELECT path FROM watch_targets WHERE id=?',
+                    (int(target_id),),
                 ).fetchone()
                 if row:
                     folder = row['path']
-                    conn.execute("DELETE FROM watch_targets WHERE id=?", (int(target_id),))
-                    watcher = getattr(DashboardHandler, 'watcher', None)
+                    conn.execute('DELETE FROM watch_targets WHERE id=?', (int(target_id),))
+                    conn.commit()
+                    watcher = DashboardHandler.watcher
                     if watcher:
                         watcher.unwatch_folder(folder)
             self._send_json({'ok': True})
-        elif path.startswith('/api/rules/'):
-            rule_id = path.split('/')[-1]
-            if not rule_id.isdigit():
-                self.send_error(400)
-                return
-            from app.engine.db import get_conn
-            with get_conn() as conn:
-                conn.execute('DELETE FROM rules WHERE id=?', (int(rule_id),))
-            self._send_json({'ok': True})
-        else:
-            self.send_error(404)
-
-    # ── PUT ─────────────────────────────────────────────────────
-    def do_PUT(self):
-        if not self._check_auth():
             return
-
-        parsed = urlparse(self.path)
-        path   = parsed.path
-        length = int(self.headers.get('Content-Length', 0))
-        body   = json.loads(self.rfile.read(length).decode('utf-8')) if length else {}
 
         if path.startswith('/api/rules/'):
             rule_id = path.split('/')[-1]
             if not rule_id.isdigit():
                 self.send_error(400)
                 return
-            dest = body.get('dest_folder', '')
-            if not is_safe_path(dest):
-                self._send_json({'error': '허용되지 않는 경로입니다'}, 400)
-                return
-            from app.engine.db import get_conn
             with get_conn() as conn:
-                conn.execute(
-                    'UPDATE rules SET category=?, ext_pattern=?, dest_folder=?, action=? WHERE id=?',
-                    (body.get('category', ''), body.get('ext_pattern', ''),
-                     dest, body.get('action', 'move'), int(rule_id)),
-                )
+                row = conn.execute(
+                    'SELECT rule_kind FROM rules WHERE id=?',
+                    (int(rule_id),),
+                ).fetchone()
+                if row and row['rule_kind'] == 'template':
+                    self._send_json({'error': '기본 규칙은 삭제할 수 없습니다.'}, 403)
+                    return
+                conn.execute('DELETE FROM rules WHERE id=?', (int(rule_id),))
+                conn.commit()
             self._send_json({'ok': True})
-        else:
-            self.send_error(404)
+            return
+
+        self.send_error(404)
+
+    def do_PUT(self):
+        if not self._check_auth():
+            return
+
+        parsed = urlparse(self.path)
+        path = parsed.path
+        body = self._read_json()
+
+        if path.startswith('/api/rules/'):
+            rule_id = path.split('/')[-1]
+            if not rule_id.isdigit():
+                self.send_error(400)
+                return
+
+            category_key = normalize_category_key(body.get('category_key') or body.get('category'))
+            dest_folder = (body.get('dest_folder') or '').strip()
+            if not category_key or not dest_folder or not is_safe_path(dest_folder):
+                self._send_json({'error': '허용되지 않는 요청입니다.'}, 400)
+                return
+            try:
+                ensure_unique_manual_rule_category(category_key, exclude_rule_id=int(rule_id))
+            except ValueError as error:
+                self._send_json({'error': str(error)}, 409)
+                return
+
+            with get_conn() as conn:
+                row = conn.execute(
+                    'SELECT rule_kind FROM rules WHERE id=?',
+                    (int(rule_id),),
+                ).fetchone()
+                if row and row['rule_kind'] == 'template':
+                    self._send_json({'error': '기본 규칙은 수정할 수 없습니다.'}, 403)
+                    return
+                conn.execute(
+                    """
+                    UPDATE rules
+                    SET category=?, category_key=?, ext_pattern=?, dest_folder=?, action=?
+                    WHERE id=?
+                    """,
+                    (
+                        body.get('category') or CATEGORY_DEFINITIONS[category_key]['label'],
+                        category_key,
+                        body.get('ext_pattern') or category_to_ext_pattern(category_key),
+                        dest_folder,
+                        body.get('action', 'move'),
+                        int(rule_id),
+                    ),
+                )
+                conn.commit()
+
+            self._send_json({'ok': True})
+            return
+
+        self.send_error(404)
 
 
 def register_watcher(watcher) -> None:
-    """main.py에서 FolderWatcherManager 인스턴스를 핸들러에 등록."""
     DashboardHandler.watcher = watcher
 
 
-def start_server():
-    try:
-        server = HTTPServer((DASHBOARD_HOST, DASHBOARD_PORT), DashboardHandler)
-    except OSError as e:
-        raise RuntimeError(
-            f'대시보드 서버를 시작할 수 없습니다 ({DASHBOARD_HOST}:{DASHBOARD_PORT}): {e}'
-        ) from e
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    print(f'[Dashboard] http://{DASHBOARD_HOST}:{DASHBOARD_PORT}')
+def register_event_bus(bus) -> None:
+    DashboardHandler.event_bus = bus
+
+
+def start_server(host: str | None = None, port: int | None = None) -> ThreadingHTTPServer:
+    """대시보드 HTTP 서버를 백그라운드 데몬 스레드로 시작."""
+    _host = host or DASHBOARD_HOST
+    _port = port or DASHBOARD_PORT
+    server = ThreadingHTTPServer((_host, _port), DashboardHandler)
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     return server
 
 
 if __name__ == '__main__':
     from app.engine.db import init_db
     init_db()
-    srv = start_server()
-    print('Ctrl+C 로 종료')
+    print(f'Dashboard → http://{DASHBOARD_HOST}:{DASHBOARD_PORT}')
+    start_server()
+    import time
     try:
-        import time
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        srv.shutdown()
-        print('종료')
+        pass 
