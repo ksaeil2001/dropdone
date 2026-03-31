@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "DropDone",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "다운로드 완료를 감지하고 DropDone 앱에 알립니다.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmMT4KkXC1VipR6R5k45uWTSvrX5QTSMLliTUUgqjeQm4AFjRcBINbuZ6r5Q5zuLyvdannDefKZrOnEwcwxWHVUQm+4aCHm/rMVKf27V5lsK+PxE4b12wVJK322Gj7NoMXnawScq6tbasS+hZJ8X99G5FjJfB07gH4WhQhc9kK4SUkEuooXYvraITuH56SdyJivMokZvMroPJDsYp7gVa/kAXjZi73SmSs3DfG13+kLzgVd3qi5/w4adUC91BBOvf6d+jdeyzbuTebojH+ZUtL1UgS63eEBxV3iFa3EOhbTYPaGBx4FrSNHRLWTk0UZX8wIWPoMfmnl36q7MhwgosaQIDAQAB",
   "permissions": ["downloads", "nativeMessaging"],
   "background": {
     "service_worker": "background.js"

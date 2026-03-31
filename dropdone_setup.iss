@@ -8,6 +8,7 @@
 #define MyAppURL "https://github.com/ksaeil2001/dropdone"
 #define MyAppExeName "DropDone.exe"
 #define MyAppDescription "다운로드 완료 자동 정리 앱"
+#define MyChromeExtensionId "aanekpdighliaaaekihmhnapnbdoiacl"
 
 [Setup]
 ; 앱 기본 정보
@@ -64,6 +65,7 @@ Source: "dist\DropDone\*"; DestDir: "{app}\DropDone"; Flags: ignoreversion recur
 
 ; Chrome Extension 폴더 (있는 경우)
 Source: "extension\*"; DestDir: "{app}\extension"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "native_host\*"; DestDir: "{app}\native_host"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 ; 시작 메뉴
@@ -82,6 +84,7 @@ Root: HKCU; Subkey: "Software\{#MyAppName}"; ValueType: string; ValueName: "Inst
 
 [Run]
 ; 설치 완료 후 바로 실행 (체크박스)
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-ExecutionPolicy Bypass -File ""{app}\native_host\register_host.ps1"" -ExtensionId ""{#MyChromeExtensionId}"""; Flags: runhidden waituntilterminated
 Filename: "{app}\DropDone\{#MyAppExeName}"; Description: "DropDone 지금 실행하기"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
