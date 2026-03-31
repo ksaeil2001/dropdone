@@ -21,7 +21,7 @@
 
 ## 설치 방법
 
-1. 아래 **Releases** 탭에서 `DropDone_Setup_v1.0.0.exe` 다운로드
+1. 아래 **Releases** 탭에서 `DropDone_Setup_v1.0.3.exe` 다운로드
 2. 설치 파일 실행 → 설치 마법사 완료
 3. 처음 실행 시 온보딩 화면에서 감시 폴더와 정리 규칙 설정
 4. 트레이 아이콘 우클릭 → **대시보드 열기** 로 상세 설정
@@ -62,17 +62,25 @@ VirusTotal 검사 결과: 주요 백신 63종 **탐지 없음** (AI 휴리스틱
 
 ```bash
 # 의존성 설치
-pip install pystray watchdog psutil pywin32 plyer pillow winotify
+pip install -r requirements.txt
+
+# 빌드 전용 의존성 설치
+pip install -r requirements-build.txt
 
 # 개발 서버 실행
 python app/main.py
 
-# PyInstaller 단일 exe 빌드
+# PyInstaller onedir 빌드
 pyinstaller build.spec
 
-# Inno Setup 인스톨러 빌드 (Inno Setup 6 필요)
+# dist 빌드본 native host 등록/검증
+powershell -ExecutionPolicy Bypass -File ".\native_host\register_host.ps1"
+
+# Inno Setup 인스톨러 빌드 (PATH에 iscc가 없으면 절대 경로 사용)
 "C:\Program Files (x86)\Inno Setup 6\iscc.exe" dropdone_setup.iss
 ```
+
+배포 직전 설치 검증은 `VM_INSTALL_VALIDATION.md` 를 기준으로 진행합니다.
 
 ---
 
