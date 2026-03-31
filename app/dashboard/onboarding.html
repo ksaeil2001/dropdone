@@ -6,211 +6,257 @@
 <title>DropDone 시작하기</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
   body {
-    font-family: -apple-system, 'Segoe UI', sans-serif;
-    background: #f0f4ff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(180deg, #eef4ff 0%, #f8fbff 100%);
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #1e293b;
+    color: #0f172a;
+    padding: 20px;
   }
-
   .container {
-    width: 560px;
-    background: white;
-    border-radius: 20px;
-    box-shadow: 0 8px 40px rgba(59,130,246,0.13);
+    width: min(720px, 100%);
+    background: #fff;
+    border-radius: 24px;
+    box-shadow: 0 20px 60px rgba(37, 99, 235, 0.14);
     overflow: hidden;
   }
-
-  /* 상단 진행 바 */
-  .progress-bar {
-    height: 4px;
-    background: #e2e8f0;
-    position: relative;
-  }
+  .progress-bar { height: 4px; background: #e2e8f0; }
   .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #3b82f6, #6366f1);
-    border-radius: 2px;
-    transition: width 0.4s cubic-bezier(.4,0,.2,1);
+    background: linear-gradient(90deg, #2563eb, #4f46e5);
+    transition: width 0.35s ease;
   }
-
-  /* 스텝 공통 */
-  .step { display: none; padding: 48px 44px 40px; }
+  .step { display: none; padding: 40px 44px 34px; }
   .step.active { display: block; }
-
   .step-badge {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    background: #eff6ff;
-    color: #3b82f6;
+    gap: 8px;
     font-size: 12px;
-    font-weight: 600;
-    padding: 4px 12px;
-    border-radius: 20px;
-    margin-bottom: 20px;
-    letter-spacing: 0.3px;
-  }
-
-  .step-icon {
-    font-size: 52px;
-    margin-bottom: 16px;
-    display: block;
-  }
-
-  h1 {
-    font-size: 26px;
     font-weight: 700;
-    color: #0f172a;
-    line-height: 1.3;
+    color: #2563eb;
+    background: #eff6ff;
+    border-radius: 999px;
+    padding: 6px 12px;
+    margin-bottom: 18px;
+  }
+  .hero-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #2563eb, #4f46e5);
+    color: #fff;
+    font-size: 28px;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 30px;
+    line-height: 1.25;
     margin-bottom: 10px;
   }
-
   .subtitle {
-    font-size: 15px;
     color: #64748b;
-    line-height: 1.6;
-    margin-bottom: 32px;
+    font-size: 15px;
+    line-height: 1.7;
+    margin-bottom: 28px;
   }
-
-  /* 버튼 */
-  .btn-primary {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, #3b82f6, #6366f1);
-    color: white;
-    border: none;
+  .info-card, .preview-card {
+    border: 1px solid #dbeafe;
+    background: #f8fbff;
+    border-radius: 18px;
+    padding: 20px;
+  }
+  .info-list { display: grid; gap: 14px; }
+  .info-row { display: flex; gap: 14px; align-items: flex-start; }
+  .info-icon {
+    width: 36px;
+    height: 36px;
     border-radius: 12px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity .2s, transform .1s;
-    letter-spacing: 0.2px;
+    background: #dbeafe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 18px;
   }
-  .btn-primary:hover { opacity: .92; transform: translateY(-1px); }
-  .btn-primary:active { transform: translateY(0); }
-
-  .btn-secondary {
-    width: 100%;
-    padding: 13px;
-    background: transparent;
-    color: #64748b;
+  .info-title { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+  .info-desc { font-size: 13px; color: #64748b; line-height: 1.55; }
+  .card-list, .rule-cards { display: grid; gap: 12px; }
+  .folder-card, .rule-card {
     border: 1.5px solid #e2e8f0;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 500;
+    border-radius: 16px;
+    padding: 16px;
     cursor: pointer;
-    margin-top: 10px;
-    transition: border-color .2s, color .2s;
+    user-select: none;
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
   }
-  .btn-secondary:hover { border-color: #3b82f6; color: #3b82f6; }
-
-  /* 폴더 체크박스 카드 */
-  .folder-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
-
-  .folder-card {
+  .folder-card:hover, .rule-card:hover {
+    border-color: #93c5fd;
+    background: #f8fbff;
+    transform: translateY(-1px);
+  }
+  .folder-card.selected, .rule-card.selected {
+    border-color: #2563eb;
+    background: #eff6ff;
+  }
+  .folder-card input { display: none; }
+  .folder-row {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 14px 16px;
-    border: 1.5px solid #e2e8f0;
-    border-radius: 12px;
-    cursor: pointer;
-    transition: border-color .2s, background .2s;
-    user-select: none;
   }
-  .folder-card:hover { border-color: #93c5fd; background: #f8faff; }
-  .folder-card.selected { border-color: #3b82f6; background: #eff6ff; }
-  .folder-card input[type="checkbox"] { display: none; }
-
-  .folder-icon { font-size: 24px; flex-shrink: 0; }
-  .folder-info { flex: 1; min-width: 0; }
-  .folder-name { font-size: 14px; font-weight: 600; color: #0f172a; }
-  .folder-path { font-size: 12px; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  .check-circle {
-    width: 22px; height: 22px;
-    border: 2px solid #cbd5e1;
-    border-radius: 50%;
-    flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    transition: border-color .2s, background .2s;
-    font-size: 12px; color: transparent;
-  }
-  .folder-card.selected .check-circle {
-    border-color: #3b82f6;
-    background: #3b82f6;
-    color: white;
-  }
-
-  /* 규칙 카드 */
-  .rule-cards { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
-
-  .rule-card {
-    flex: 1; min-width: 140px;
-    padding: 16px 14px;
-    border: 1.5px solid #e2e8f0;
-    border-radius: 12px;
-    cursor: pointer;
-    text-align: center;
-    transition: border-color .2s, background .2s;
-    user-select: none;
-  }
-  .rule-card:hover { border-color: #93c5fd; background: #f8faff; }
-  .rule-card.selected { border-color: #3b82f6; background: #eff6ff; }
-
-  .rule-emoji { font-size: 28px; margin-bottom: 8px; display: block; }
-  .rule-name { font-size: 13px; font-weight: 600; color: #0f172a; }
-  .rule-desc { font-size: 11px; color: #94a3b8; margin-top: 3px; }
-
-  /* 완료 화면 */
-  .done-card {
-    background: #f8faff;
-    border: 1.5px solid #dbeafe;
+  .folder-icon {
+    width: 42px;
+    height: 42px;
     border-radius: 14px;
-    padding: 20px;
-    margin-bottom: 28px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+    background: #e0f2fe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
   }
-  .done-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
-  .done-num {
-    width: 26px; height: 26px;
+  .folder-name { font-size: 15px; font-weight: 700; }
+  .folder-path { font-size: 12px; color: #64748b; margin-top: 3px; }
+  .folder-check {
+    margin-left: auto;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
-    background: #3b82f6;
-    color: white;
+    border: 2px solid #cbd5e1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    flex-shrink: 0;
+  }
+  .folder-card.selected .folder-check {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  .field-label {
+    display: block;
     font-size: 12px;
     font-weight: 700;
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    margin-top: 1px;
+    color: #334155;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
-  .done-text { font-size: 14px; color: #334155; line-height: 1.5; }
-  .done-text strong { color: #0f172a; font-weight: 600; }
-
-  /* 하단 페이지 인디케이터 */
+  .text-input {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    padding: 13px 15px;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .text-input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+  }
+  .hint {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.5;
+    margin-top: 8px;
+  }
+  .rule-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 18px; }
+  .rule-emoji { font-size: 28px; display: block; margin-bottom: 10px; }
+  .rule-name { font-size: 14px; font-weight: 700; }
+  .rule-desc { font-size: 12px; color: #64748b; margin-top: 6px; }
+  .preview-card { margin-top: 18px; }
+  .preview-title { font-size: 13px; font-weight: 700; margin-bottom: 12px; }
+  .preview-list { display: grid; gap: 10px; }
+  .preview-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 13px;
+    color: #334155;
+  }
+  .preview-name { font-weight: 700; }
+  .preview-path {
+    color: #64748b;
+    max-width: 60%;
+    text-align: right;
+    word-break: break-all;
+  }
+  .done-card {
+    background: #f8fbff;
+    border: 1px solid #dbeafe;
+    border-radius: 18px;
+    padding: 20px;
+    display: grid;
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+  .done-row { display: flex; gap: 12px; align-items: flex-start; }
+  .done-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: #2563eb;
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .done-text { font-size: 14px; line-height: 1.6; color: #334155; }
+  .done-text strong { color: #0f172a; }
+  .actions { display: flex; gap: 10px; margin-top: 24px; }
+  .btn-primary, .btn-secondary {
+    flex: 1;
+    border-radius: 14px;
+    padding: 14px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+  }
+  .btn-primary {
+    color: #fff;
+    background: linear-gradient(135deg, #2563eb, #4f46e5);
+  }
+  .btn-secondary {
+    background: #fff;
+    color: #334155;
+    border: 1px solid #dbe2f0;
+  }
   .dots {
     display: flex;
     justify-content: center;
-    gap: 7px;
+    gap: 8px;
     padding: 0 44px 28px;
   }
   .dot {
-    width: 7px; height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: #e2e8f0;
-    transition: background .3s, transform .3s;
+    background: #dbe2f0;
+    transition: transform 0.2s ease, background 0.2s ease;
   }
-  .dot.active { background: #3b82f6; transform: scale(1.3); }
+  .dot.active {
+    background: #2563eb;
+    transform: scale(1.25);
+  }
+  @media (max-width: 700px) {
+    .step { padding: 28px 22px 24px; }
+    .rule-cards { grid-template-columns: 1fr; }
+    .actions { flex-direction: column; }
+    .dots { padding: 0 22px 22px; }
+  }
 </style>
 </head>
 <body>
@@ -220,161 +266,154 @@
     <div class="progress-fill" id="progressFill" style="width: 25%"></div>
   </div>
 
-  <!-- STEP 1: 환영 -->
   <div class="step active" id="step1">
-    <span class="step-icon">📦</span>
-    <div class="step-badge">✨ 설치 완료</div>
-    <h1>DropDone에 오신 것을<br>환영합니다</h1>
+    <div class="hero-icon">↓</div>
+    <div class="step-badge">설치 완료</div>
+    <h1>DropDone이 기본 정리 구조를<br>바로 만들어 둡니다.</h1>
     <p class="subtitle">
-      다운로드가 완료되면 파일을 자동으로 정리해 드립니다.<br>
-      딱 2분이면 설정이 끝납니다.
+      다운로드가 끝난 직후 파일을 분류해서 <strong>seilF</strong> 폴더 아래로 자동 정리합니다.
+      지금은 감시 폴더와 기본 저장 위치만 잡아 두면 됩니다.
     </p>
 
-    <div style="background:#f8faff; border-radius:14px; padding:20px; margin-bottom:28px; display:flex; flex-direction:column; gap:12px;">
-      <div style="display:flex; align-items:center; gap:12px;">
-        <span style="font-size:20px;">🌐</span>
-        <div>
-          <div style="font-size:13px; font-weight:600; color:#0f172a;">브라우저 다운로드</div>
-          <div style="font-size:12px; color:#64748b;">Chrome, Edge, Firefox 모두 감지</div>
+    <div class="info-card">
+      <div class="info-list">
+        <div class="info-row">
+          <div class="info-icon">🧠</div>
+          <div>
+            <div class="info-title">고신뢰 판정</div>
+            <div class="info-desc">파일 시그니처, 브라우저 MIME, 확장자를 함께 보고 PDF, 영상, 이미지, 음악을 분류합니다.</div>
+          </div>
         </div>
-      </div>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <span style="font-size:20px;">📱</span>
-        <div>
-          <div style="font-size:13px; font-weight:600; color:#0f172a;">앱 다운로드</div>
-          <div style="font-size:12px; color:#64748b;">MEGA, Hitomi Downloader, 일반 복사</div>
+        <div class="info-row">
+          <div class="info-icon">🗂️</div>
+          <div>
+            <div class="info-title">기본 템플릿</div>
+            <div class="info-desc">`00영상`, `01이미지`, `02PDF`, `03음악` 폴더를 자동으로 만듭니다.</div>
+          </div>
         </div>
-      </div>
-      <div style="display:flex; align-items:center; gap:12px;">
-        <span style="font-size:20px;">⚡</span>
-        <div>
-          <div style="font-size:13px; font-weight:600; color:#0f172a;">자동 정리</div>
-          <div style="font-size:12px; color:#64748b;">완료 즉시 지정 폴더로 이동</div>
+        <div class="info-row">
+          <div class="info-icon">🔄</div>
+          <div>
+            <div class="info-title">중복 이벤트 병합</div>
+            <div class="info-desc">브라우저 완료 이벤트와 파일 시스템 이벤트를 한 건으로 합쳐 중복 이동을 줄입니다.</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <button class="btn-primary" onclick="goTo(2)">시작하기 →</button>
+    <div class="actions">
+      <button class="btn-primary" onclick="goTo(2)">시작하기</button>
+    </div>
   </div>
 
-  <!-- STEP 2: 감시 폴더 선택 -->
   <div class="step" id="step2">
-    <div class="step-badge">📂 1단계 / 2</div>
+    <div class="step-badge">1 / 2 감시 폴더</div>
     <h1>어느 폴더를 감시할까요?</h1>
-    <p class="subtitle">다운로드가 완료되면 여기서 파일을 감지합니다.</p>
+    <p class="subtitle">다운로드 완료 감지는 여기서 시작합니다. 기본값으로 다운로드 폴더만 선택해도 됩니다.</p>
 
-    <div class="folder-list">
-      <label class="folder-card selected" onclick="toggleCard(event, this)">
-        <input type="checkbox" checked>
-        <span class="folder-icon">⬇️</span>
-        <div class="folder-info">
-          <div class="folder-name">다운로드</div>
-          <div class="folder-path">C:\Users\사용자\Downloads</div>
+    <div class="card-list">
+      <label class="folder-card selected" onclick="toggleFolder(event, this)">
+        <input type="checkbox" checked data-folder="Downloads">
+        <div class="folder-row">
+          <div class="folder-icon">⬇️</div>
+          <div>
+            <div class="folder-name">다운로드</div>
+            <div class="folder-path">C:\Users\사용자\Downloads</div>
+          </div>
+          <div class="folder-check">✓</div>
         </div>
-        <div class="check-circle">✓</div>
       </label>
-
-      <label class="folder-card" onclick="toggleCard(event, this)">
-        <input type="checkbox">
-        <span class="folder-icon">🖥️</span>
-        <div class="folder-info">
-          <div class="folder-name">바탕화면</div>
-          <div class="folder-path">C:\Users\사용자\Desktop</div>
+      <label class="folder-card" onclick="toggleFolder(event, this)">
+        <input type="checkbox" data-folder="Desktop">
+        <div class="folder-row">
+          <div class="folder-icon">🖥️</div>
+          <div>
+            <div class="folder-name">바탕화면</div>
+            <div class="folder-path">C:\Users\사용자\Desktop</div>
+          </div>
+          <div class="folder-check">✓</div>
         </div>
-        <div class="check-circle">✓</div>
-      </label>
-
-      <label class="folder-card" onclick="toggleCard(event, this)">
-        <input type="checkbox">
-        <span class="folder-icon">📁</span>
-        <div class="folder-info">
-          <div class="folder-name">직접 추가</div>
-          <div class="folder-path">다른 폴더를 지정합니다</div>
-        </div>
-        <div class="check-circle">✓</div>
       </label>
     </div>
 
-    <button class="btn-primary" onclick="goTo(3)">다음 →</button>
-    <button class="btn-secondary" onclick="goTo(1)">← 이전</button>
+    <div class="actions">
+      <button class="btn-primary" onclick="goTo(3)">다음</button>
+      <button class="btn-secondary" onclick="goTo(1)">이전</button>
+    </div>
   </div>
 
-  <!-- STEP 3: 첫 규칙 설정 -->
   <div class="step" id="step3">
-    <div class="step-badge">⚙️ 2단계 / 2</div>
-    <h1>어떤 파일을 정리할까요?</h1>
-    <p class="subtitle">자주 받는 파일 종류를 선택하면 자동 정리 규칙이 만들어집니다.</p>
+    <div class="step-badge">2 / 2 기본 구조</div>
+    <h1>`seilF` 기본 정리 경로를 확인하세요.</h1>
+    <p class="subtitle">
+      이 경로 아래에 기본 템플릿 규칙을 생성합니다. 나중에 대시보드 설정에서 언제든 바꿀 수 있습니다.
+    </p>
+
+    <label class="field-label" for="baseDirInput">기본 정리 폴더</label>
+    <input id="baseDirInput" class="text-input" type="text" placeholder="C:\Users\사용자\Downloads\seilF" oninput="renderPreview()">
+    <div class="hint">기본값은 `Downloads\seilF` 입니다. 저장하면 폴더와 기본 규칙 4개가 자동 생성됩니다.</div>
 
     <div class="rule-cards">
-      <div class="rule-card selected" onclick="toggleRule(this)">
+      <div class="rule-card selected" data-key="video" onclick="toggleRule(this)">
         <span class="rule-emoji">🎬</span>
-        <div class="rule-name">영상</div>
-        <div class="rule-desc">mp4, mkv, avi…</div>
+        <div class="rule-name">00영상</div>
+        <div class="rule-desc">mp4, mkv, avi, mov, wmv, webm</div>
       </div>
-      <div class="rule-card" onclick="toggleRule(this)">
-        <span class="rule-emoji">🎵</span>
-        <div class="rule-name">음악</div>
-        <div class="rule-desc">mp3, flac, wav…</div>
-      </div>
-      <div class="rule-card" onclick="toggleRule(this)">
-        <span class="rule-emoji">📄</span>
-        <div class="rule-name">문서</div>
-        <div class="rule-desc">pdf, docx, xlsx…</div>
-      </div>
-      <div class="rule-card" onclick="toggleRule(this)">
-        <span class="rule-emoji">📦</span>
-        <div class="rule-name">압축</div>
-        <div class="rule-desc">zip, rar, 7z…</div>
-      </div>
-      <div class="rule-card" onclick="toggleRule(this)">
+      <div class="rule-card selected" data-key="image" onclick="toggleRule(this)">
         <span class="rule-emoji">🖼️</span>
-        <div class="rule-name">이미지</div>
-        <div class="rule-desc">jpg, png, gif…</div>
+        <div class="rule-name">01이미지</div>
+        <div class="rule-desc">jpg, png, gif, webp, bmp</div>
       </div>
-      <div class="rule-card" onclick="toggleRule(this)">
-        <span class="rule-emoji">⚙️</span>
-        <div class="rule-name">실행파일</div>
-        <div class="rule-desc">exe, msi…</div>
+      <div class="rule-card selected" data-key="pdf" onclick="toggleRule(this)">
+        <span class="rule-emoji">📄</span>
+        <div class="rule-name">02PDF</div>
+        <div class="rule-desc">pdf</div>
+      </div>
+      <div class="rule-card selected" data-key="audio" onclick="toggleRule(this)">
+        <span class="rule-emoji">🎵</span>
+        <div class="rule-name">03음악</div>
+        <div class="rule-desc">mp3, flac, wav, aac, ogg, m4a</div>
       </div>
     </div>
 
-    <button class="btn-primary" onclick="goTo(4)">완료 →</button>
-    <button class="btn-secondary" onclick="goTo(2)">← 이전</button>
+    <div class="preview-card">
+      <div class="preview-title">생성될 기본 폴더</div>
+      <div class="preview-list" id="previewList"></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-primary" onclick="goTo(4)">완료</button>
+      <button class="btn-secondary" onclick="goTo(2)">이전</button>
+    </div>
   </div>
 
-  <!-- STEP 4: 완료 -->
   <div class="step" id="step4">
-    <span class="step-icon">🎉</span>
-    <div class="step-badge">✅ 설정 완료</div>
-    <h1>준비됐습니다!</h1>
-    <p class="subtitle">DropDone이 백그라운드에서 조용히 작동합니다.</p>
+    <div class="hero-icon">✓</div>
+    <div class="step-badge">설정 완료</div>
+    <h1>바로 사용할 수 있습니다.</h1>
+    <p class="subtitle">DropDone은 백그라운드에서 파일 완료 이벤트를 기다리다가 분류 후 자동 이동합니다.</p>
 
     <div class="done-card">
       <div class="done-row">
         <div class="done-num">1</div>
-        <div class="done-text">
-          파일을 다운로드하면 <strong>완료 즉시 자동으로 정리</strong>됩니다.
-        </div>
+        <div class="done-text"><strong>다운로드 완료</strong> 이벤트를 모은 뒤 한 번만 처리합니다.</div>
       </div>
       <div class="done-row">
         <div class="done-num">2</div>
-        <div class="done-text">
-          우측 하단 <strong>트레이 아이콘</strong>을 클릭하면 대시보드를 열 수 있습니다.
-        </div>
+        <div class="done-text"><strong>seilF 템플릿 규칙 4개</strong>는 기본 규칙으로 생성되고, 수동 규칙 개수 제한에 포함되지 않습니다.</div>
       </div>
       <div class="done-row">
         <div class="done-num">3</div>
-        <div class="done-text">
-          대시보드에서 <strong>규칙 추가·수정</strong>과 완료 기록을 확인할 수 있습니다.
-        </div>
+        <div class="done-text">대시보드 <strong>설정</strong>에서 기본 경로 변경과 템플릿 재생성을 할 수 있습니다.</div>
       </div>
     </div>
 
-    <button class="btn-primary" onclick="finish()">대시보드 열기</button>
-    <button class="btn-secondary" onclick="finish()">나중에 설정하기</button>
+    <div class="actions">
+      <button class="btn-primary" onclick="finish()">대시보드 열기</button>
+      <button class="btn-secondary" onclick="goTo(3)">다시 확인</button>
+    </div>
   </div>
 
-  <!-- 페이지 인디케이터 -->
   <div class="dots">
     <div class="dot active" id="dot1"></div>
     <div class="dot" id="dot2"></div>
@@ -385,72 +424,97 @@
 
 <script>
   let currentStep = 1;
+  const PREVIEW_FOLDERS = [
+    ['00영상', 'video'],
+    ['01이미지', 'image'],
+    ['02PDF', 'pdf'],
+    ['03음악', 'audio'],
+  ];
+
+  const token = (() => {
+    const value = new URLSearchParams(window.location.search).get('token') || '';
+    if (value) sessionStorage.setItem('dd_token', value);
+    return value || sessionStorage.getItem('dd_token') || '';
+  })();
+
+  function authHeaders(extra) {
+    return Object.assign({ 'X-DropDone-Token': token }, extra || {});
+  }
 
   function goTo(step) {
-    document.getElementById('step' + currentStep).classList.remove('active');
-    document.getElementById('dot' + currentStep).classList.remove('active');
+    document.getElementById(`step${currentStep}`).classList.remove('active');
+    document.getElementById(`dot${currentStep}`).classList.remove('active');
     currentStep = step;
-    document.getElementById('step' + currentStep).classList.add('active');
-    document.getElementById('dot' + currentStep).classList.add('active');
-    document.getElementById('progressFill').style.width = (step * 25) + '%';
+    document.getElementById(`step${currentStep}`).classList.add('active');
+    document.getElementById(`dot${currentStep}`).classList.add('active');
+    document.getElementById('progressFill').style.width = `${step * 25}%`;
     window.scrollTo(0, 0);
   }
 
-  function toggleCard(e, el) {
-    e.preventDefault();
-    el.classList.toggle('selected');
-    el.querySelector('input').checked = el.classList.contains('selected');
+  function toggleFolder(event, card) {
+    event.preventDefault();
+    card.classList.toggle('selected');
+    const checkbox = card.querySelector('input');
+    checkbox.checked = card.classList.contains('selected');
   }
 
-  function toggleRule(el) {
-    el.classList.toggle('selected');
+  function toggleRule(card) {
+    card.classList.toggle('selected');
   }
 
   function getSelectedFolders() {
-    const map = { '다운로드': 'Downloads', '바탕화면': 'Desktop' };
-    const result = [];
-    document.querySelectorAll('.folder-card.selected .folder-name').forEach(el => {
-      const key = map[el.textContent.trim()];
-      if (key) result.push(key);
-    });
-    return result;
+    return Array.from(document.querySelectorAll('.folder-card input:checked')).map((input) => input.dataset.folder);
   }
 
   function getSelectedCategories() {
-    const result = [];
-    document.querySelectorAll('.rule-card.selected .rule-name').forEach(el => {
-      result.push(el.textContent.trim());
-    });
-    return result;
+    return Array.from(document.querySelectorAll('.rule-card.selected')).map((card) => card.dataset.key);
   }
 
-  /* ── 토큰 ── */
-  const _token = (() => {
-    const t = new URLSearchParams(window.location.search).get('token') || '';
-    if (t) sessionStorage.setItem('dd_token', t);
-    return t || sessionStorage.getItem('dd_token') || '';
-  })();
-  function _authHdr(extra) {
-    return Object.assign({ 'X-DropDone-Token': _token }, extra || {});
+  function renderPreview() {
+    const baseDir = document.getElementById('baseDirInput').value.trim();
+    const previewList = document.getElementById('previewList');
+    previewList.innerHTML = PREVIEW_FOLDERS.map(([label]) => `
+      <div class="preview-row">
+        <span class="preview-name">${label}</span>
+        <span class="preview-path">${baseDir ? `${baseDir}\\${label}` : label}</span>
+      </div>
+    `).join('');
   }
 
-  function finish() {
+  async function loadDefaults() {
+    try {
+      const response = await fetch('/api/settings', { headers: authHeaders() });
+      const settings = await response.json();
+      document.getElementById('baseDirInput').value = settings.organize_base_dir || '';
+    } catch (error) {
+      document.getElementById('baseDirInput').value = 'C:\\Users\\사용자\\Downloads\\seilF';
+    }
+    renderPreview();
+  }
+
+  async function finish() {
     const payload = {
-      folders:    getSelectedFolders(),
+      folders: getSelectedFolders(),
       categories: getSelectedCategories(),
+      base_dir: document.getElementById('baseDirInput').value.trim(),
     };
-    fetch('/api/onboarding/save', {
-      method: 'POST',
-      headers: _authHdr({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload),
-    })
-    .then(() => fetch('/api/onboarding/complete', {
-      method: 'POST',
-      headers: _authHdr({ 'Content-Type': 'application/json' }),
-    }))
-    .then(() => { window.location.href = '/?token=' + _token; })
-    .catch(() => { window.location.href = '/?token=' + _token; });
+
+    try {
+      await fetch('/api/onboarding/save', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+      });
+      await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+      });
+    } finally {
+      window.location.href = `/?token=${token}`;
+    }
   }
+
+  loadDefaults();
 </script>
 </body>
 </html>

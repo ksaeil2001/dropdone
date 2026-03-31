@@ -1,110 +1,196 @@
 import logging
 import os
 import shutil
-from app.config import CATEGORY_EXTENSIONS, FREE_PLAN_MAX_RULES
-from .db import get_rules, get_setting
+import time
+
+from app.config import (
+    CATEGORY_DEFINITIONS,
+    CATEGORY_LABEL_TO_KEY,
+    FREE_PLAN_MAX_RULES,
+    category_label,
+    ext_pattern_for_category_key,
+    template_rule_specs,
+)
+from .db import get_conn, get_rules, get_setting, insert_error
 
 
 def _send_notify(filename: str, dest_folder: str):
     try:
         from app.utils.notifier import notify
+
         folder_name = os.path.basename(dest_folder.rstrip('/\\'))
         notify(
             title='DropDone',
-            message=f'{filename} → {folder_name}',
+            message=f'{filename} -> {folder_name}',
             icon_path='assets/icon.ico',
         )
     except Exception:
         pass
 
 
-# ── 무한루프 방지 ────────────────────────────────────────────
 def is_subpath(child: str, parent: str) -> bool:
-    """child가 parent의 하위 경로(또는 동일 경로)이면 True."""
-    c = os.path.realpath(child)
-    p = os.path.realpath(parent)
-    return c == p or c.startswith(p + os.sep)
+    child_path = os.path.realpath(child)
+    parent_path = os.path.realpath(parent)
+    return child_path == parent_path or child_path.startswith(parent_path + os.sep)
 
 
 def _get_watch_paths() -> set[str]:
-    """watch_targets 테이블에서 감시 폴더 경로 목록을 가져온다."""
     try:
-        from .db import get_conn
         with get_conn() as conn:
-            rows = conn.execute("SELECT path FROM watch_targets").fetchall()
-        return {os.path.realpath(r[0]) for r in rows if r[0]}
+            rows = conn.execute('SELECT path FROM watch_targets').fetchall()
+        return {os.path.realpath(row[0]) for row in rows if row[0]}
     except Exception:
         return set()
 
 
-# ── 파일 충돌 방지 ────────────────────────────────────────────
 def get_unique_path(dest_path: str) -> str:
-    """목적지에 동명 파일이 있으면 movie(1).mkv, movie(2).mkv … 형식으로 반환."""
     if not os.path.exists(dest_path):
         return dest_path
     base, ext = os.path.splitext(dest_path)
-    i = 1
-    while os.path.exists(f'{base}({i}){ext}'):
-        i += 1
-    return f'{base}({i}){ext}'
+    index = 1
+    while os.path.exists(f'{base}({index}){ext}'):
+        index += 1
+    return f'{base}({index}){ext}'
 
 
-# ── 규칙 매칭 ────────────────────────────────────────────────
-def match_rule(filename: str, rules: list) -> dict | None:
-    ext = os.path.splitext(filename)[1].lower()
-    for rule in rules:
-        patterns = rule['ext_pattern'].split()
-        if ext in patterns:
-            return rule
+def _limit_rules_for_plan(rules: list[dict], plan: str) -> list[dict]:
+    if plan != 'free':
+        return rules
+
+    manual_rules = [rule for rule in rules if rule.get('rule_kind') != 'template']
+    template_rules = [rule for rule in rules if rule.get('rule_kind') == 'template']
+    return manual_rules[:FREE_PLAN_MAX_RULES] + template_rules
+
+
+def _matches_extension(filename: str, ext_pattern: str) -> bool:
+    extension = os.path.splitext(filename or '')[1].lower()
+    patterns = {
+        part.strip().lower()
+        for part in (ext_pattern or '').split()
+        if part.strip()
+    }
+    return bool(extension and extension in patterns)
+
+
+def match_rule(event: dict, rules: list[dict]) -> dict | None:
+    category_key = (event.get('category_key') or '').strip().lower()
+    filename = event.get('filename', '')
+
+    manual_rules = sorted(
+        [rule for rule in rules if rule.get('rule_kind') != 'template'],
+        key=lambda rule: (int(rule.get('priority') or 0), int(rule.get('id') or 0)),
+        reverse=True,
+    )
+    template_rules = sorted(
+        [rule for rule in rules if rule.get('rule_kind') == 'template'],
+        key=lambda rule: (int(rule.get('priority') or 0), int(rule.get('id') or 0)),
+        reverse=True,
+    )
+
+    for rule_group in (manual_rules, template_rules):
+        if category_key:
+            for rule in rule_group:
+                if (rule.get('category_key') or '').strip().lower() == category_key:
+                    return rule
+        for rule in rule_group:
+            if _matches_extension(filename, rule.get('ext_pattern', '')):
+                return rule
     return None
 
 
-# ── 규칙 적용 ────────────────────────────────────────────────
-def apply_rules(event: dict):
-    plan  = get_setting('plan', 'free')
-    rules = get_rules()
-    if plan == 'free':
-        rules = rules[:FREE_PLAN_MAX_RULES]
+def _move_with_retry(src: str, dest: str, attempts: int = 5) -> str | None:
+    delay = 0.15
+    last_error: Exception | None = None
 
-    rule = match_rule(event['filename'], rules)
-    if rule is None:
-        return
-
-    src      = event['path']
-    dest_dir = rule['dest_folder']
-
-    # 3. 무한루프 감지: dest_dir 자체가 감시 폴더 목록에 있으면 건너뜀
-    #    (Downloads\영상 같은 하위 폴더라도 watch_targets에 없으면 정상 이동)
-    watch_paths = _get_watch_paths()
-    if os.path.realpath(dest_dir) in watch_paths:
-        logging.warning(f'[Rules] 무한루프 방지: {dest_dir}는 감시폴더와 동일 — 건너뜀')
-        return
-
-    os.makedirs(dest_dir, exist_ok=True)
-
-    # 4. 파일 충돌 방지: 동명 파일 있으면 번호 붙이기
-    dest = get_unique_path(os.path.join(dest_dir, event['filename']))
-
-    if not os.path.exists(src):
-        return
-
-    if rule['action'] == 'move':
+    for attempt in range(attempts):
         try:
             shutil.move(src, dest)
-            print(f'[Rules] moved {src} → {dest}')
-            _send_notify(os.path.basename(dest), rule['dest_folder'])
             return dest
-        except (PermissionError, FileNotFoundError, OSError) as e:
-            logging.error(f'[Rules] 이동 실패 {src}: {e}')
-            try:
-                from .db import insert_error
-                insert_error('rules', str(e), src)
-            except Exception:
-                pass
-            return None
-    # 'extract' 는 프리미엄 기능 (추후 구현)
+        except (PermissionError, FileNotFoundError, OSError) as error:
+            last_error = error
+            if not os.path.exists(src):
+                break
+            if attempt == attempts - 1:
+                break
+            time.sleep(delay)
+            delay *= 2
+
+    if last_error:
+        raise last_error
+    return None
 
 
-def category_to_ext_pattern(category: str) -> str:
-    exts = CATEGORY_EXTENSIONS.get(category, [])
-    return ' '.join(exts)
+def apply_rules(event: dict):
+    plan = get_setting('plan', 'free')
+    rules = _limit_rules_for_plan(get_rules(), plan)
+    rule = match_rule(event, rules)
+    if rule is None:
+        return None
+
+    src = event.get('path', '')
+    dest_dir = rule.get('dest_folder', '')
+    if not src or not dest_dir or not os.path.exists(src):
+        return None
+
+    watch_paths = _get_watch_paths()
+    if os.path.realpath(dest_dir) in watch_paths:
+        logging.warning('[Rules] skipped watched destination: %s', dest_dir)
+        return None
+
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = get_unique_path(os.path.join(dest_dir, event['filename']))
+
+    if rule.get('action') != 'move':
+        return None
+
+    try:
+        result = _move_with_retry(src, dest)
+        if result:
+            logging.info('[Rules] moved: %s -> %s', src, dest)
+            _send_notify(event.get('filename', ''), dest_dir)
+        return result
+    except Exception as error:
+        logging.error('[Rules] move failed: %s -> %s | %s', src, dest, error)
+        try:
+            insert_error('rules', str(error), src)
+        except Exception:
+            pass
+        return None
+
+
+def category_to_ext_pattern(category_key: str) -> str:
+    return ext_pattern_for_category_key(category_key)
+
+
+def ensure_template_rules(base_dir: str) -> list[dict]:
+    """base_dir 기반 템플릿 규칙을 DB에 삽입/갱신하고 결과 목록 반환."""
+    specs = template_rule_specs(base_dir)
+    with get_conn() as conn:
+        for spec in specs:
+            os.makedirs(spec['dest_folder'], exist_ok=True)
+            existing = conn.execute(
+                "SELECT id FROM rules WHERE rule_kind='template' AND category_key=?",
+                (spec['category_key'],),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE rules SET dest_folder=?, ext_pattern=?, priority=? WHERE id=?",
+                    (spec['dest_folder'], spec['ext_pattern'], spec['priority'], existing['id']),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO rules (category, category_key, ext_pattern, dest_folder, action, enabled, priority, rule_kind) "
+                    "VALUES (?,?,?,?,?,1,?,?)",
+                    (
+                        spec['category'],
+                        spec['category_key'],
+                        spec['ext_pattern'],
+                        spec['dest_folder'],
+                        spec['action'],
+                        spec['priority'],
+                        spec['rule_kind'],
+                    ),
+                )
+        conn.commit()
+    return get_rules()
+                    
