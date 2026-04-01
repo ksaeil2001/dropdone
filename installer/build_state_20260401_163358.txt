@@ -1,0 +1,23 @@
+version:     1.0.3
+timestamp:   2026-04-01 16:33:58
+commit_hash: d1fc2805b1735951345f8d46945179eb6330d4da
+branch:      main
+
+installer:   installer/DropDone_Setup_v1.0.3.exe
+size_bytes:  12197521
+size_mb:     11.63
+
+pyinstaller: 6.19.0
+python:      3.10.10
+platform:    Windows-10-10.0.26200-SP0
+
+--- git status ---
+On branch main
+Your branch is ahead of 'origin/main' by 6 commits.
+
+Untracked files (not tracked, not part of build):
+  .claude/
+  git_commit_rounds.sh
+  vm_validate.ps1
+
+nothing added to commit but untracked files present
