@@ -30,6 +30,52 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
         conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
 
 
+def _dedupe_manual_rules(conn: sqlite3.Connection):
+    rows = conn.execute(
+        """
+        SELECT id, category_key
+        FROM rules
+        WHERE rule_kind='manual' AND category_key != ''
+        ORDER BY category_key ASC, priority DESC, id DESC
+        """
+    ).fetchall()
+
+    seen: set[str] = set()
+    delete_ids: list[tuple[int]] = []
+    for row in rows:
+        category_key = row['category_key']
+        if category_key in seen:
+            delete_ids.append((row['id'],))
+            continue
+        seen.add(category_key)
+
+    if delete_ids:
+        conn.executemany('DELETE FROM rules WHERE id=?', delete_ids)
+
+
+def _dedupe_watch_targets(conn: sqlite3.Connection):
+    rows = conn.execute(
+        """
+        SELECT id, path
+        FROM watch_targets
+        WHERE path != ''
+        ORDER BY path ASC, id DESC
+        """
+    ).fetchall()
+
+    seen: set[str] = set()
+    delete_ids: list[tuple[int]] = []
+    for row in rows:
+        path = row['path']
+        if path in seen:
+            delete_ids.append((row['id'],))
+            continue
+        seen.add(path)
+
+    if delete_ids:
+        conn.executemany('DELETE FROM watch_targets WHERE id=?', delete_ids)
+
+
 def _ensure_schema(conn: sqlite3.Connection):
     _ensure_column(conn, 'downloads', 'detector', "TEXT DEFAULT ''")
     _ensure_column(conn, 'downloads', 'category_key', "TEXT DEFAULT ''")
@@ -38,6 +84,10 @@ def _ensure_schema(conn: sqlite3.Connection):
     _ensure_column(conn, 'downloads', 'final_dest', "TEXT DEFAULT ''")
 
     _ensure_column(conn, 'watch_targets', 'mode', "TEXT DEFAULT 'all'")
+    _dedupe_watch_targets(conn)
+    conn.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_watch_targets_path ON watch_targets(path)'
+    )
 
     _ensure_column(conn, 'rules', 'rule_kind', "TEXT DEFAULT 'manual'")
     _ensure_column(conn, 'rules', 'category_key', "TEXT DEFAULT ''")
@@ -54,6 +104,15 @@ def _ensure_schema(conn: sqlite3.Connection):
                 'UPDATE rules SET category_key=? WHERE id=?',
                 (guessed, row['id']),
             )
+
+    _dedupe_manual_rules(conn)
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_rules_manual_category_unique
+        ON rules(category_key)
+        WHERE rule_kind='manual' AND category_key != ''
+        """
+    )
 
 
 def get_db() -> sqlite3.Connection:
@@ -131,6 +190,7 @@ def init_db():
         INSERT OR IGNORE INTO settings VALUES ('plan', 'free');
         INSERT OR IGNORE INTO settings VALUES ('onboarding_complete', 'false');
         INSERT OR IGNORE INTO settings VALUES ('notifications_enabled', 'true');
+        INSERT OR IGNORE INTO settings VALUES ('template_categories', 'video,image,pdf,audio');
 
         CREATE INDEX IF NOT EXISTS idx_downloads_timestamp ON downloads(created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_watch_session ON watch_targets(session_id);

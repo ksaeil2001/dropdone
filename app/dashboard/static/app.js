@@ -8,6 +8,10 @@ function authHeaders(extra = {}) {
   return { 'X-DropDone-Token': token, ...extra };
 }
 
+function escapeHtml(str) {
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 async function api(path) {
   const response = await fetch(path, { headers: authHeaders() });
   if (!response.ok) {
@@ -65,12 +69,19 @@ const CATEGORY_META = {
 
 const MANUAL_CATEGORIES = [
   { key: 'video', label: '영상', icon: '🎬', exts: '.mp4 .mkv .avi .mov .wmv .m4v .webm .flv' },
-  { key: 'document', label: '문서', icon: '📄', exts: '.pdf .docx .xlsx .pptx .txt .hwp .csv' },
+  { key: 'document', label: '문서', icon: '📄', exts: '.docx .xlsx .pptx .txt .hwp .csv' },
   { key: 'archive', label: '압축', icon: '📦', exts: '.zip .rar .7z .tar .gz .bz2' },
   { key: 'image', label: '이미지', icon: '🖼️', exts: '.jpg .jpeg .png .gif .webp .bmp .svg .psd' },
   { key: 'audio', label: '음악', icon: '🎵', exts: '.mp3 .flac .wav .aac .ogg .m4a' },
   { key: 'executable', label: '실행파일', icon: '⚙️', exts: '.exe .msi .apk .dmg' },
 ];
+
+const TEMPLATE_FOLDERS = {
+  video: '00영상',
+  image: '01이미지',
+  pdf: '02PDF',
+  audio: '03음악',
+};
 
 const TITLES = {
   active: '최근 완료',
@@ -123,7 +134,7 @@ async function renderTab(tab) {
     if (tab === 'rules') await renderRules(content);
     if (tab === 'settings') await renderSettings(content);
   } catch (error) {
-    content.innerHTML = `<div class="empty-state" style="color:var(--red)">${error.message}</div>`;
+    content.innerHTML = `<div class="empty-state" style="color:var(--red)">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -155,12 +166,12 @@ async function renderActive(content) {
         return `
           <div class="dl-card done">
             <div class="dl-card-top">
-              <span class="source-badge badge-${download.source}">${sourceLabel(download.source)}</span>
-              <span class="rule-type-badge">${category.label}</span>
-              <span class="dl-name">${download.filename}</span>
+              <span class="source-badge badge-${escapeHtml(download.source)}">${escapeHtml(sourceLabel(download.source))}</span>
+              <span class="rule-type-badge">${escapeHtml(category.label)}</span>
+              <span class="dl-name">${escapeHtml(download.filename)}</span>
               <span class="dl-size">${fmtSize(download.size)}</span>
             </div>
-            <div class="dl-path">${finalPath}</div>
+            <div class="dl-path">${escapeHtml(finalPath)}</div>
             <div class="dl-meta">${fmtDate(download.created_at)}</div>
           </div>
         `;
@@ -230,13 +241,13 @@ function renderHistoryRows(rows) {
         <td>
           <div class="filename-cell">
             <div class="file-icon ${fileIconClass(download)}">${fileIcon(download)}</div>
-            <span class="filename-text">${download.filename}</span>
+            <span class="filename-text">${escapeHtml(download.filename)}</span>
           </div>
         </td>
-        <td>${category.label}</td>
-        <td><span class="source-badge badge-${download.source}">${sourceLabel(download.source)}</span></td>
+        <td>${escapeHtml(category.label)}</td>
+        <td><span class="source-badge badge-${escapeHtml(download.source)}">${escapeHtml(sourceLabel(download.source))}</span></td>
         <td>${fmtSize(download.size)}</td>
-        <td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text3)">${finalPath}</td>
+        <td style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text3)">${escapeHtml(finalPath)}</td>
         <td>${fmtDate(download.created_at)}</td>
       </tr>
     `;
@@ -279,23 +290,30 @@ function renderRuleItem(rule) {
 
   return `
     <div class="rule-item">
-      <span class="rule-cat">${rule.category}</span>
+      <span class="rule-cat">${escapeHtml(rule.category)}</span>
       ${badge}
       <span class="rule-arrow">→</span>
-      <span class="rule-dest">${rule.dest_folder}</span>
-      <span class="rule-exts">${rule.ext_pattern.split(' ').slice(0, 4).join(' ')}${rule.ext_pattern.split(' ').length > 4 ? ' …' : ''}</span>
+      <span class="rule-dest">${escapeHtml(rule.dest_folder)}</span>
+      <span class="rule-exts">${escapeHtml(rule.ext_pattern.split(' ').slice(0, 4).join(' '))}${rule.ext_pattern.split(' ').length > 4 ? ' …' : ''}</span>
       ${actionButton}
     </div>
   `;
 }
 
+
+
 async function renderSettings(content) {
   const settings = await api('/api/settings');
   settingsCache = settings;
   const baseDir = settings.organize_base_dir || '';
-  const preview = ['00영상', '01이미지', '02PDF', '03음악']
-    .map((folder) => `<div class="ss-row"><span class="ss-key">${folder}</span><span class="ss-val">${baseDir}\\${folder}</span></div>`)
-    .join('');
+  const selectedTemplateFolders = (Array.isArray(settings.template_categories) ? settings.template_categories : Object.keys(TEMPLATE_FOLDERS))
+    .map((categoryKey) => TEMPLATE_FOLDERS[categoryKey])
+    .filter(Boolean);
+  const preview = selectedTemplateFolders.length
+    ? selectedTemplateFolders
+      .map((folder) => `<div class="ss-row"><span class="ss-key">${escapeHtml(folder)}</span><span class="ss-val">${escapeHtml(baseDir ? `${baseDir}\\${folder}` : folder)}</span></div>`)
+      .join('')
+    : '<div class="ss-row"><span class="ss-val">선택된 기본 규칙이 없습니다.</span></div>';
 
   content.innerHTML = `
     <div class="settings-grid">
@@ -318,10 +336,10 @@ async function renderSettings(content) {
       <div class="settings-section">
         <div class="ss-title">기본 정리 폴더</div>
         <div class="settings-input-row">
-          <input class="settings-input" id="organizeBaseDirInput" type="text" value="${baseDir}">
+          <input class="settings-input" id="organizeBaseDirInput" type="text" value="${escapeHtml(baseDir)}">
           <button class="btn primary" onclick="saveOrganizeBaseDir()">저장</button>
         </div>
-        <div class="settings-hint">기본값은 Downloads\\seilF 입니다. 저장하면 템플릿 규칙이 새 경로로 갱신됩니다.</div>
+        <div class="settings-hint">기본값은 Downloads\\seilF 입니다. 저장하면 선택한 기본 규칙 경로가 갱신됩니다.</div>
         <div class="settings-button-row">
           <button class="btn" onclick="rebuildTemplateRules()">기본 템플릿 재생성</button>
         </div>
@@ -465,9 +483,9 @@ function showErrorModal() {
   if (!modal || !list) return;
   list.innerHTML = errorCache.length ? errorCache.map((error) => `
     <div style="border:1px solid var(--border,#2d3148);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
-      <div style="font-size:12px;color:var(--text3,#94a3b8);margin-bottom:4px;">${error.timestamp}</div>
-      <div style="font-size:13px;color:#fbbf24;margin-bottom:4px;word-break:break-all;">${error.filepath || '(경로 없음)'}</div>
-      <div style="font-size:12px;color:var(--red,#ef4444);">${error.message}</div>
+      <div style="font-size:12px;color:var(--text3,#94a3b8);margin-bottom:4px;">${escapeHtml(error.timestamp)}</div>
+      <div style="font-size:13px;color:#fbbf24;margin-bottom:4px;word-break:break-all;">${escapeHtml(error.filepath || '(경로 없음)')}</div>
+      <div style="font-size:12px;color:var(--red,#ef4444);">${escapeHtml(error.message)}</div>
     </div>
   `).join('') : '<div style="color:var(--text3,#94a3b8);text-align:center;padding:32px;">오류가 없습니다.</div>';
   modal.style.display = 'flex';

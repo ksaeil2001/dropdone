@@ -76,10 +76,14 @@ pyinstaller build.spec
 # dist 빌드본 native host 등록/검증
 powershell -ExecutionPolicy Bypass -File ".\native_host\register_host.ps1"
 
-# Inno Setup 인스톨러 빌드 (PATH에 iscc가 없으면 절대 경로 사용)
-"C:\Program Files (x86)\Inno Setup 6\iscc.exe" dropdone_setup.iss
+# Inno Setup 환경 감지 + 인스톨러 빌드 + smoke check
+powershell -ExecutionPolicy Bypass -File ".\installer\build_installer.ps1"
+
+# dist까지 새로 만들고 싶으면
+powershell -ExecutionPolicy Bypass -File ".\installer\build_installer.ps1" -RebuildDist
 ```
 
+`ISCC.exe`가 없으면 스크립트가 즉시 실패하고 설치 방법을 안내합니다.
 배포 직전 설치 검증은 `VM_INSTALL_VALIDATION.md` 를 기준으로 진행합니다.
 
 ---

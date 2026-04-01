@@ -141,7 +141,7 @@ Copy-Item "same.mp4" "$env:USERPROFILE\Downloads\"
 | dest 폴더가 존재하지 않는 규칙 적용 | 폴더 자동 생성 후 이동 | ☐ |
 | 0바이트 파일 다운로드 완료 | 이벤트는 기록되나 이동 스킵 또는 정상 이동 | ☐ |
 | 백신 차단으로 파일 이동 실패 | 에러 로그에 기록, 앱 크래시 없음 | ☐ |
-| 실 앱 실행 중 test_e2e.py 실행 | 포트 충돌 없음 (17879/7879 사용) | ☐ |
+| 실 앱 실행 중 test_e2e.py 실행 | 브리지 충돌 없음 (user-scoped pipe + 7879 사용) | ☐ |
 
 ---
 
@@ -168,7 +168,7 @@ Copy-Item "same.mp4" "$env:USERPROFILE\Downloads\"
 |------|-------------|--------------|
 | Classifier 단위 | ✅ TC01 | - |
 | Native Host 프로토콜 | ✅ TC02 | STEP 2-1 |
-| TCP 브리지 | ✅ TC03 | - |
+| Named pipe 브리지 | ✅ TC03 | - |
 | MEGA/TMP 감지 | ✅ TC04 | STEP 3 |
 | 규칙 이동 | ✅ TC05 | STEP 4 |
 | Dashboard REST API | ✅ TC06 | STEP 5 |

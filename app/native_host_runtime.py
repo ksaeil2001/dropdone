@@ -1,15 +1,21 @@
 import json
 import os
-import socket
 import struct
 import sys
 from datetime import datetime
 
 from app.config import LOG_DIR
+from app.native_bridge import (
+    get_bridge_pipe_name,
+    pywintypes,
+    require_win32_named_pipe_support,
+    win32con,
+    win32file,
+    win32pipe,
+    winerror,
+    write_pipe_message,
+)
 
-
-BRIDGE_HOST = '127.0.0.1'
-BRIDGE_PORT = 17878
 LOG_PATH = os.path.join(LOG_DIR, 'native_host.log')
 
 
@@ -30,11 +36,17 @@ def _record_bridge_error(message: str, filepath: str = ''):
         log(f'failed to persist native host error: {error}')
 
 
+_MAX_MSG_SIZE = 1_048_576  # Chrome native messaging caps messages at 1 MB
+
+
 def read_message():
     raw_len = sys.stdin.buffer.read(4)
     if not raw_len:
         return None
     msg_len = struct.unpack('<I', raw_len)[0]
+    if msg_len == 0 or msg_len > _MAX_MSG_SIZE:
+        log(f'rejected message: invalid length {msg_len}')
+        return None
     raw_msg = sys.stdin.buffer.read(msg_len)
     return json.loads(raw_msg.decode('utf-8'))
 
@@ -46,12 +58,49 @@ def send_message(msg: dict):
     sys.stdout.buffer.flush()
 
 
-def forward_to_app(msg: dict) -> tuple[bool, str | None]:
+def forward_to_app(msg: dict, pipe_name: str | None = None) -> tuple[bool, str | None]:
+    target_pipe = pipe_name or get_bridge_pipe_name()
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as bridge:
-            bridge.settimeout(3)
-            bridge.connect((BRIDGE_HOST, BRIDGE_PORT))
-            bridge.sendall(json.dumps(msg).encode('utf-8'))
+        require_win32_named_pipe_support()
+        deadline_ms = 3000
+        try:
+            handle = win32file.CreateFile(
+                target_pipe,
+                win32con.GENERIC_READ | win32con.GENERIC_WRITE,
+                0,
+                None,
+                win32con.OPEN_EXISTING,
+                0,
+                None,
+            )
+        except pywintypes.error as exc:
+            if exc.winerror != winerror.ERROR_PIPE_BUSY:
+                raise
+            if not win32pipe.WaitNamedPipe(target_pipe, deadline_ms):
+                raise TimeoutError(f'bridge unavailable: {target_pipe}')
+            handle = win32file.CreateFile(
+                target_pipe,
+                win32con.GENERIC_READ | win32con.GENERIC_WRITE,
+                0,
+                None,
+                win32con.OPEN_EXISTING,
+                0,
+                None,
+            )
+
+        try:
+            win32pipe.SetNamedPipeHandleState(handle, win32pipe.PIPE_READMODE_MESSAGE, None, None)
+            write_pipe_message(handle, json.dumps(msg).encode('utf-8'))
+            _result, raw_response = win32file.ReadFile(handle, _MAX_MSG_SIZE)
+        finally:
+            win32file.CloseHandle(handle)
+
+        response = json.loads(raw_response.decode('utf-8')) if raw_response else {}
+        if response.get('status') != 'ok':
+            err_msg = response.get('error') or 'bridge rejected message'
+            log(f"forward rejected: {err_msg}")
+            return False, err_msg
+
         log(f"forwarded: {msg.get('filename', '?')} ({msg.get('size', 0)} bytes)")
         return True, None
     except Exception as exc:

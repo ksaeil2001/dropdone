@@ -47,7 +47,7 @@ CATEGORY_DEFINITIONS = {
     },
     'document': {
         'label': '문서',
-        'extensions': ['.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.hwp', '.csv'],
+        'extensions': ['.docx', '.xlsx', '.pptx', '.txt', '.hwp', '.csv'],
         'template_subdir': None,
     },
     'archive': {
@@ -87,9 +87,24 @@ def ext_pattern_for_category_key(category_key: str) -> str:
     return ' '.join(CATEGORY_DEFINITIONS.get(category_key, {}).get('extensions', []))
 
 
-def template_rule_specs(base_dir: str) -> list[dict]:
+def normalize_template_category_keys(category_keys: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    if category_keys is None:
+        return TEMPLATE_CATEGORY_KEYS
+
+    requested = {
+        str(category_key).strip()
+        for category_key in category_keys
+        if str(category_key).strip() in TEMPLATE_CATEGORY_KEYS
+    }
+    return tuple(category_key for category_key in TEMPLATE_CATEGORY_KEYS if category_key in requested)
+
+
+def template_rule_specs(
+    base_dir: str,
+    category_keys: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     specs = []
-    for priority, category_key in enumerate(TEMPLATE_CATEGORY_KEYS):
+    for priority, category_key in enumerate(normalize_template_category_keys(category_keys)):
         definition = CATEGORY_DEFINITIONS[category_key]
         specs.append({
             'category': definition['label'],

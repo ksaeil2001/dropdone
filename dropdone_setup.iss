@@ -81,6 +81,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 ; 앱 정보 등록 (프로그램 추가/제거에 표시)
 Root: HKCU; Subkey: "Software\{#MyAppName}"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
+; Chrome native host 등록. 설치 후 PowerShell 스크립트가 동일 경로를 다시 검증/갱신한다.
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.dropdone.host"; ValueType: string; ValueName: ""; ValueData: "{app}\native_host\dropdone_host.json"; Flags: uninsdeletekey
 
 [Run]
 ; 설치 완료 후 바로 실행 (체크박스)

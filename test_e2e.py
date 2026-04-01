@@ -2,7 +2,7 @@
 DropDone E2E 테스트 (Headless — 트레이 없이 실행 가능)
 ======================================================
 커버 범위:
-  1. Chrome → TCP :17878 → EventBus → Classifier → DB → Rules  (Chrome 흐름 시뮬)
+  1. Chrome → Native Host → named pipe → EventBus → Classifier → DB → Rules
   2. Native Host 프로토콜 (4바이트 LE 길이 프리픽스)
   3. Dashboard REST API  (/api/downloads, /api/rules, /api/settings, /api/stats)
   4. Dashboard SSE 스트림  (/api/events)
@@ -22,7 +22,6 @@ import json
 import os
 import queue
 import shutil
-import socket
 import struct
 import sys
 import tempfile
@@ -54,9 +53,11 @@ from app.detector.chrome import ChromeDetector
 from app.detector.folder_watcher import FolderWatcherManager
 from app.dashboard.server import register_event_bus, register_watcher, start_server
 from app.engine.classifier import classify_download, classify_extension, classify_mime, classify_signature
+from app.native_bridge import get_bridge_pipe_name
+from app.native_host_runtime import forward_to_app
 
-# ── 포트 상수 (테스트 전용 포트 사용) ────────────────────────────────────────
-BRIDGE_PORT   = 17879   # 실 앱(:17878)과 충돌 방지
+# ── 브리지 상수 (테스트 전용 pipe 사용) ───────────────────────────────────────
+BRIDGE_PIPE_NAME = get_bridge_pipe_name('e2e')
 DASHBOARD_PORT = 7879   # 실 앱(:7878)과 충돌 방지
 
 # ── 테스트용 임시 폴더 ────────────────────────────────────────────────────────
@@ -79,12 +80,11 @@ def info(msg): print(f'  {YELLOW}[INFO]{RESET} {msg}')
 # 헬퍼
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def send_to_tcp(port: int, payload: dict, timeout: float = 3.0) -> None:
-    """ChromeDetector TCP 포트로 JSON 전송."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(timeout)
-        s.connect(('127.0.0.1', port))
-        s.sendall(json.dumps(payload).encode('utf-8'))
+def send_to_bridge(payload: dict) -> None:
+    """Native host 경로를 통해 named pipe 브리지로 JSON 전송."""
+    ok, err = forward_to_app(payload, pipe_name=BRIDGE_PIPE_NAME)
+    if not ok:
+        raise RuntimeError(err or 'bridge send failed')
 
 
 def native_host_encode(msg: dict) -> bytes:
@@ -104,7 +104,11 @@ def native_host_decode(raw: bytes) -> dict:
 def api_get(path: str, port: int = DASHBOARD_PORT, timeout: float = 3.0) -> dict | list:
     """대시보드 REST API GET."""
     url = f'http://127.0.0.1:{port}{path}'
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    req = urllib.request.Request(
+        url,
+        headers={'X-DropDone-Token': get_setting('api_token', '')},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
 
 
@@ -132,6 +136,7 @@ _WATCHER: FolderWatcherManager | None = None
 _SERVER = None
 _RECEIVED: list[dict] = []
 _LOCK = threading.Lock()
+_FIXTURES_ACTIVE = False
 
 
 def _on_event(event: dict):
@@ -149,7 +154,9 @@ def _process_download(event: dict):
 
 def _setup_shared_fixtures():
     """모든 테스트 전에 한 번 실행."""
-    global _BUS, _CHROME, _WATCHER, _SERVER
+    global _BUS, _CHROME, _WATCHER, _SERVER, _FIXTURES_ACTIVE
+    if _FIXTURES_ACTIVE:
+        return
 
     with _LOCK:
         _RECEIVED.clear()
@@ -184,10 +191,14 @@ def _setup_shared_fixtures():
     _BUS.subscribe(_on_event)
     _BUS.subscribe(_process_download)
 
-    # ChromeDetector (테스트 포트) — 생성자에 직접 전달, monkeypatch 불필요
-    _CHROME = ChromeDetector(_BUS, port=BRIDGE_PORT)
+    # ChromeDetector (테스트 pipe) — 생성자에 직접 전달, monkeypatch 불필요
+    _CHROME = ChromeDetector(
+        _BUS,
+        pipe_name=BRIDGE_PIPE_NAME,
+        client_validator=lambda _pid: (True, 'test harness'),
+    )
     _CHROME.start()
-    time.sleep(0.3)  # 포트 바인딩 대기
+    time.sleep(0.3)  # pipe 준비 대기
 
     # FolderWatcher
     _WATCHER = FolderWatcherManager(_BUS)
@@ -200,10 +211,13 @@ def _setup_shared_fixtures():
     register_watcher(_WATCHER)
     _SERVER = start_server(port=DASHBOARD_PORT)
     time.sleep(0.5)
+    _FIXTURES_ACTIVE = True
 
 
 def _teardown_shared_fixtures():
-    global _BUS, _CHROME, _WATCHER, _SERVER
+    global _BUS, _CHROME, _WATCHER, _SERVER, _FIXTURES_ACTIVE
+    if not _FIXTURES_ACTIVE:
+        return
 
     if _CHROME:
         _CHROME.stop()
@@ -225,6 +239,15 @@ def _teardown_shared_fixtures():
     register_watcher(None)
     _BUS = None
     shutil.rmtree(TMP_ROOT, ignore_errors=True)
+    _FIXTURES_ACTIVE = False
+
+
+def setUpModule():
+    _setup_shared_fixtures()
+
+
+def tearDownModule():
+    _teardown_shared_fixtures()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -309,11 +332,11 @@ class TC02_NativeHostProtocol(unittest.TestCase):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# TC03 — Chrome TCP → EventBus 흐름
+# TC03 — Chrome bridge → EventBus 흐름
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TC03_ChromeTCP(unittest.TestCase):
-    """TCP :BRIDGE_PORT → EventBus 수신 검증."""
+class TC03_ChromeBridge(unittest.TestCase):
+    """Named pipe bridge → EventBus 수신 검증."""
 
     def _count_before(self):
         with _LOCK:
@@ -321,7 +344,7 @@ class TC03_ChromeTCP(unittest.TestCase):
 
     def test_basic_mp4_event(self):
         before = self._count_before()
-        send_to_tcp(BRIDGE_PORT, {
+        send_to_bridge({
             'source': 'chrome',
             'filename': 'movie_e2e.mp4',
             'path': 'C:\\Users\\test\\Downloads\\movie_e2e.mp4',
@@ -332,7 +355,7 @@ class TC03_ChromeTCP(unittest.TestCase):
         with _LOCK:
             after = len(_RECEIVED)
         self.assertGreater(after, before, '이벤트가 EventBus에 도달하지 않음')
-        ok('Chrome TCP → EventBus 이벤트 수신 확인')
+        ok('Chrome bridge → EventBus 이벤트 수신 확인')
 
     def test_duplicate_suppression(self):
         """동일 path+size 이벤트를 settle window 내에 2회 전송 → 1회만 처리."""
@@ -344,9 +367,9 @@ class TC03_ChromeTCP(unittest.TestCase):
             'mime': 'video/mp4',
         }
         before = self._count_before()
-        send_to_tcp(BRIDGE_PORT, payload)
+        send_to_bridge(payload)
         time.sleep(0.2)
-        send_to_tcp(BRIDGE_PORT, payload)
+        send_to_bridge(payload)
         time.sleep(1.5)
         with _LOCK:
             received = [e for e in _RECEIVED if e.get('filename') == 'dup_test.mp4']
@@ -355,7 +378,7 @@ class TC03_ChromeTCP(unittest.TestCase):
 
     def test_unicode_filename(self):
         before = self._count_before()
-        send_to_tcp(BRIDGE_PORT, {
+        send_to_bridge({
             'source': 'chrome',
             'filename': '한글_영상파일.mkv',
             'path': 'C:\\Users\\test\\Downloads\\한글_영상파일.mkv',
@@ -530,7 +553,7 @@ class TC06_DashboardAPI(unittest.TestCase):
         found = any('movie_e2e' in f or 'dup_test' in f or '한글_영상파일' in f
                     for f in filenames)
         self.assertTrue(found, f'DB에 Chrome 이벤트 기록 없음. 현재 목록: {filenames[:5]}')
-        ok('Chrome TCP 이벤트가 DB에 정상 저장됨')
+        ok('Chrome bridge 이벤트가 DB에 정상 저장됨')
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -540,14 +563,17 @@ class TC06_DashboardAPI(unittest.TestCase):
 class TC07_SSE(unittest.TestCase):
 
     def test_sse_receives_event(self):
-        """SSE 구독 후 TCP 이벤트 전송 → SSE로 수신 확인."""
+        """SSE 구독 후 bridge 이벤트 전송 → SSE로 수신 확인."""
         sse_events: list[str] = []
         stop_event = threading.Event()
 
         def _sse_reader():
             try:
                 url = f'http://127.0.0.1:{DASHBOARD_PORT}/api/events'
-                req = urllib.request.Request(url)
+                req = urllib.request.Request(
+                    url,
+                    headers={'X-DropDone-Token': get_setting('api_token', '')},
+                )
                 with urllib.request.urlopen(req, timeout=6) as resp:
                     for raw_line in resp:
                         if stop_event.is_set():
@@ -562,7 +588,7 @@ class TC07_SSE(unittest.TestCase):
         reader.start()
         time.sleep(0.5)  # SSE 연결 안정화
 
-        send_to_tcp(BRIDGE_PORT, {
+        send_to_bridge({
             'source': 'chrome',
             'filename': 'sse_probe.mp4',
             'path': 'C:\\test\\sse_probe.mp4',
@@ -588,9 +614,9 @@ class TC07_SSE(unittest.TestCase):
 class TC08_FullPipeline(unittest.TestCase):
 
     def test_chrome_to_db_to_api(self):
-        """Chrome TCP → EventBus → Classifier → DB → /api/downloads 조회."""
+        """Chrome bridge → EventBus → Classifier → DB → /api/downloads 조회."""
         unique_name = f'pipeline_{int(time.time())}.mp4'
-        send_to_tcp(BRIDGE_PORT, {
+        send_to_bridge({
             'source': 'chrome',
             'filename': unique_name,
             'path': f'C:\\Downloads\\{unique_name}',
@@ -727,7 +753,7 @@ class TC09_LoadTest(unittest.TestCase):
 ALL_SUITES = [
     TC01_Classifier,
     TC02_NativeHostProtocol,
-    TC03_ChromeTCP,
+    TC03_ChromeBridge,
     TC04_FolderWatcher,
     TC05_Rules,
     TC06_DashboardAPI,
@@ -763,7 +789,7 @@ if __name__ == '__main__':
     verbose = '-v' in sys.argv
 
     print(f'\n{YELLOW}━━━ DropDone E2E 테스트 시작 ━━━{RESET}')
-    print(f'  bridge port : {BRIDGE_PORT}')
+    print(f'  bridge pipe : {BRIDGE_PIPE_NAME}')
     print(f'  dashboard   : http://127.0.0.1:{DASHBOARD_PORT}')
     print(f'  watch dir   : {WATCH_DIR}')
     print(f'  dest dir    : {DEST_DIR}')

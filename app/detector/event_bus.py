@@ -1,3 +1,5 @@
+import json
+import logging
 import queue
 import threading
 import uuid
@@ -106,7 +108,7 @@ class EventBus:
             try:
                 handler(data)
             except Exception:
-                pass
+                logging.exception('[EventBus] handler error for event: %s', data.get('id', '?'))
 
         payload = _json_dumps(data)
         with self._sse_lock:
@@ -165,5 +167,4 @@ class EventBus:
 
 
 def _json_dumps(obj) -> str:
-    import json
     return json.dumps(obj, ensure_ascii=False, default=str)

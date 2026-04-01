@@ -73,6 +73,7 @@ def _setup_logging():
 _setup_logging()
 
 from app import notify
+from app.bridge_event_guard import bridge_event_requires_validation, validate_bridge_download_event
 from app.dashboard.server import register_event_bus, register_watcher, start_server
 from app.detector.chrome import ChromeDetector
 from app.detector.event_bus import EventBus
@@ -90,6 +91,14 @@ from app.tray import build_tray
 
 
 def on_download_complete(event: dict):
+    if bridge_event_requires_validation(event):
+        ok, reason, validated_event = validate_bridge_download_event(event)
+        if not ok:
+            logging.warning('[BridgeValidation] dropped event: %s', reason)
+            insert_error('bridge_validation', reason or 'bridge validation failed', event.get('path', ''))
+            return
+        event = validated_event or event
+
     classified_event = classify_download(event)
     insert_download(classified_event)
     notify.show('Download complete', classified_event['filename'])

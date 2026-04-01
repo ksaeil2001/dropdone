@@ -91,6 +91,10 @@ def classify_signature(path: str) -> dict:
     if head.startswith(_WMV_ASF_GUID):
         return _result('video', 'signature', SIGNATURE_CONFIDENCE)
     if len(head) >= 12 and head[4:8] == b'ftyp':
+        brand = head[8:12]
+        _AUDIO_FTYP_BRANDS = {b'M4A ', b'M4B ', b'M4P ', b'aac ', b'mp21'}
+        if brand in _AUDIO_FTYP_BRANDS:
+            return _result('audio', 'signature', SIGNATURE_CONFIDENCE)
         return _result('video', 'signature', SIGNATURE_CONFIDENCE)
     if head.startswith(b'\x1a\x45\xdf\xa3'):
         lowered = head.lower()

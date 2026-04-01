@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -339,6 +340,7 @@ class FolderWatcherManager:
         self.event_bus = event_bus
         self._observer = Observer()
         self._watches: dict[str, list] = {}
+        self._lock = threading.Lock()
 
     def _schedule(self, folder: str, mode: str) -> list:
         watches = []
@@ -356,24 +358,27 @@ class FolderWatcherManager:
         return watches
 
     def watch(self, folder: str, mode: str = 'all'):
-        if folder in self._watches:
-            return
-        watches = self._schedule(folder, mode)
-        self._watches[folder] = watches
+        with self._lock:
+            if folder in self._watches:
+                return
+            watches = self._schedule(folder, mode)
+            self._watches[folder] = watches
 
     def watch_folder(self, folder: str, mode: str = 'all'):
-        if folder in self._watches:
-            print(f'[Watcher] already watching: {folder}')
-            return
-        if not os.path.isdir(folder):
-            print(f'[Watcher] folder not found: {folder}')
-            return
-        watches = self._schedule(folder, mode)
-        self._watches[folder] = watches
-        print(f'[Watcher] watching: {folder} (mode={mode})')
+        with self._lock:
+            if folder in self._watches:
+                print(f'[Watcher] already watching: {folder}')
+                return
+            if not os.path.isdir(folder):
+                print(f'[Watcher] folder not found: {folder}')
+                return
+            watches = self._schedule(folder, mode)
+            self._watches[folder] = watches
+            print(f'[Watcher] watching: {folder} (mode={mode})')
 
     def unwatch_folder(self, folder: str):
-        watches = self._watches.pop(folder, [])
+        with self._lock:
+            watches = self._watches.pop(folder, [])
         for watch in watches:
             try:
                 self._observer.unschedule(watch)

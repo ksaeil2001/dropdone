@@ -9,6 +9,7 @@ from app.config import (
     FREE_PLAN_MAX_RULES,
     category_label,
     ext_pattern_for_category_key,
+    normalize_template_category_keys,
     template_rule_specs,
 )
 from .db import get_conn, get_rules, get_setting, insert_error
@@ -137,6 +138,10 @@ def apply_rules(event: dict):
         logging.warning('[Rules] skipped watched destination: %s', dest_dir)
         return None
 
+    # Prevent infinite loops: file is already in its destination folder
+    if os.path.realpath(os.path.dirname(src)) == os.path.realpath(dest_dir):
+        return None
+
     os.makedirs(dest_dir, exist_ok=True)
     dest = get_unique_path(os.path.join(dest_dir, event['filename']))
 
@@ -162,10 +167,23 @@ def category_to_ext_pattern(category_key: str) -> str:
     return ext_pattern_for_category_key(category_key)
 
 
-def ensure_template_rules(base_dir: str) -> list[dict]:
+def ensure_template_rules(
+    base_dir: str,
+    category_keys: list[str] | tuple[str, ...] | None = None,
+) -> list[dict]:
     """base_dir 기반 템플릿 규칙을 DB에 삽입/갱신하고 결과 목록 반환."""
-    specs = template_rule_specs(base_dir)
+    selected_category_keys = tuple(normalize_template_category_keys(category_keys))
+    specs = template_rule_specs(base_dir, selected_category_keys)
     with get_conn() as conn:
+        if selected_category_keys:
+            placeholders = ','.join('?' for _ in selected_category_keys)
+            conn.execute(
+                f"DELETE FROM rules WHERE rule_kind='template' AND category_key NOT IN ({placeholders})",
+                selected_category_keys,
+            )
+        else:
+            conn.execute("DELETE FROM rules WHERE rule_kind='template'")
+
         for spec in specs:
             os.makedirs(spec['dest_folder'], exist_ok=True)
             existing = conn.execute(

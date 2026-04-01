@@ -32,8 +32,8 @@ python app/engine/db.py
 # PyInstaller 빌드 → dist/DropDone/
 pyinstaller build.spec --clean -y
 
-# Inno Setup 인스톨러 → installer/DropDone_Setup_vX.X.X.exe
-"C:\Program Files (x86)\Inno Setup 6\iscc.exe" dropdone_setup.iss
+# Inno Setup 환경 감지 + 인스톨러 빌드 + smoke check
+powershell -ExecutionPolicy Bypass -File ".\installer\build_installer.ps1"
 
 # 버전 태그
 git tag vX.X.X && git push origin vX.X.X
@@ -53,7 +53,7 @@ native_host\register_host.bat
       │ Native Messaging (stdio)              │ watchdog 파일시스템
       ▼                                       ▼
 [native_host_runtime.py]         [folder_watcher.py]
-      │ TCP :17878                            │
+      │ Named pipe (PID + ancestry 검증)       │
       ▼                                       │
 [ChromeDetector]                              │
       └──────────────────┬───────────────────┘
@@ -136,7 +136,7 @@ SSE 지원: `bus.add_sse_client(queue)` / `bus.remove_sse_client(queue)` 로 대
 
 ### Chrome ↔ Native Host
 
-Chrome Extension → `native_host_runtime.py`(stdio) → TCP 17878 → `ChromeDetector`.
+Chrome Extension → `native_host_runtime.py`(stdio) → user-scoped named pipe → `ChromeDetector`.
 
 Extension ID는 `native_host/dropdone_host.json`의 `allowed_origins`에 등록 필수. `dropdone_host_run.bat`가 `DropDone.exe --native-host`를 실행하며, `main.py`는 `--native-host` 플래그 감지 시 즉시 `native_host_runtime.run_native_host()`로 분기한다.
 

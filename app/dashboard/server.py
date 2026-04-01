@@ -1,6 +1,7 @@
 import hmac
 import json
 import os
+import sqlite3
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +17,9 @@ from app.config import (
     DASHBOARD_PORT,
     FREE_PLAN_MAX_RULES,
     MANUAL_CATEGORY_KEYS,
+    TEMPLATE_CATEGORY_KEYS,
     default_organize_base_dir,
+    normalize_template_category_keys,
 )
 from app.engine.db import (
     clear_errors,
@@ -31,6 +34,9 @@ from app.engine.db import (
     set_setting,
 )
 from app.engine.rules import category_to_ext_pattern, ensure_template_rules
+
+
+MANUAL_RULE_CONFLICT_MESSAGE = '해당 카테고리에는 수동 규칙을 하나만 만들 수 있습니다.'
 
 
 def is_safe_path(path: str) -> bool:
@@ -56,31 +62,45 @@ def normalize_category_key(value: str) -> str:
     return CATEGORY_LABEL_TO_KEY.get(raw, '')
 
 
+def _load_selected_template_categories() -> list[str]:
+    raw = get_setting('template_categories', ','.join(TEMPLATE_CATEGORY_KEYS))
+    return list(normalize_template_category_keys(raw.split(',')))
+
+
+def _store_selected_template_categories(category_keys: list[str] | tuple[str, ...]) -> list[str]:
+    normalized = list(normalize_template_category_keys(category_keys))
+    set_setting('template_categories', ','.join(normalized))
+    return normalized
+
+
 def upsert_watch_target(path: str, mode: str = 'all') -> None:
     with get_conn() as conn:
-        exists = conn.execute(
-            'SELECT id, mode FROM watch_targets WHERE path=?',
-            (path,),
-        ).fetchone()
-        if not exists:
-            conn.execute(
-                "INSERT INTO watch_targets (path, mode, total_count, action) VALUES (?, ?, 0, 'watch')",
-                (path, mode),
-            )
-        elif exists['mode'] != mode:
-            conn.execute(
-                'UPDATE watch_targets SET mode=? WHERE id=?',
-                (mode, exists['id']),
-            )
+        conn.execute(
+            """
+            INSERT INTO watch_targets (path, mode, total_count, action)
+            VALUES (?, ?, 0, 'watch')
+            ON CONFLICT(path) DO UPDATE SET mode=excluded.mode
+            """,
+            (path, mode),
+        )
         conn.commit()
 
 
-def configure_organize_base_dir(base_dir: str) -> str:
+def configure_organize_base_dir(
+    base_dir: str,
+    template_categories: list[str] | tuple[str, ...] | None = None,
+) -> str:
     normalized_base_dir = os.path.realpath(os.path.abspath(base_dir))
     if not is_safe_path(normalized_base_dir):
         raise ValueError('허용되지 않는 경로입니다.')
+
+    selected_template_categories = (
+        _load_selected_template_categories()
+        if template_categories is None
+        else _store_selected_template_categories(template_categories)
+    )
     set_setting('organize_base_dir', normalized_base_dir)
-    ensure_template_rules(normalized_base_dir)
+    ensure_template_rules(normalized_base_dir, selected_template_categories)
     return normalized_base_dir
 
 
@@ -93,7 +113,16 @@ def save_onboarding_config(body: dict, watcher=None) -> dict:
 
     folders = body.get('folders', [])
     base_dir = body.get('base_dir') or get_setting('organize_base_dir', default_organize_base_dir())
-    normalized_base_dir = configure_organize_base_dir(base_dir)
+    requested_categories = body.get('categories')
+    selected_template_categories = (
+        _load_selected_template_categories()
+        if requested_categories is None
+        else list(normalize_template_category_keys(requested_categories))
+    )
+    normalized_base_dir = configure_organize_base_dir(
+        base_dir,
+        template_categories=selected_template_categories,
+    )
 
     watch_paths = []
     for key in folders:
@@ -111,6 +140,7 @@ def save_onboarding_config(body: dict, watcher=None) -> dict:
     return {
         'ok': True,
         'organize_base_dir': normalized_base_dir,
+        'template_categories': selected_template_categories,
         'watch_paths': watch_paths,
     }
 
@@ -118,12 +148,12 @@ def save_onboarding_config(body: dict, watcher=None) -> dict:
 def ensure_unique_manual_rule_category(category_key: str, exclude_rule_id: int | None = None):
     conflict = find_manual_rule_by_category(category_key, exclude_rule_id=exclude_rule_id)
     if conflict:
-        raise ValueError('해당 카테고리에는 수동 규칙을 하나만 만들 수 있습니다.')
+        raise ValueError(MANUAL_RULE_CONFLICT_MESSAGE)
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
     _VALID_WATCH_MODES = {'all', 'browser', 'mega', 'hitomi', 'hdd'}
-    _AUTH_EXEMPT_GET = {'/', '/index.html', '/onboarding', '/onboarding.html', '/style.css', '/app.js', '/api/events'}
+    _AUTH_EXEMPT_GET = {'/', '/index.html', '/onboarding', '/onboarding.html', '/style.css', '/app.js'}
     event_bus = None
     watcher = None
 
@@ -133,13 +163,6 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _check_auth(self) -> bool:
         stored = get_setting('api_token', '')
         if not stored:
-            return True
-
-        if (
-            self.command == 'GET'
-            and self.client_address[0] == '127.0.0.1'
-            and get_setting('onboarding_complete', '') == 'true'
-        ):
             return True
 
         req_token = self.headers.get('X-DropDone-Token', '')
@@ -163,7 +186,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', len(body))
-        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Origin', 'http://127.0.0.1:7878')
         self.end_headers()
         self.wfile.write(body)
 
@@ -220,6 +243,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     'shutdown_action': get_setting('shutdown_action', 'shutdown'),
                     'plan': get_setting('plan', 'free'),
                     'organize_base_dir': get_setting('organize_base_dir', default_organize_base_dir()),
+                    'template_categories': _load_selected_template_categories(),
                     'manual_rule_count': count_rules('manual'),
                     'template_rule_count': count_rules('template'),
                 }
@@ -241,7 +265,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
             self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Origin', 'http://127.0.0.1:7878')
             self.end_headers()
             try:
                 while True:
@@ -361,9 +385,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if not ext_pattern:
                 ext_pattern = category_to_ext_pattern(category_key)
 
-            with get_conn() as conn:
-                conn.execute(
-                    """
+            try:
+                with get_conn() as conn:
+                    conn.execute(
+                        """
                     INSERT INTO rules (
                         category, category_key, ext_pattern, dest_folder,
                         action, enabled, priority, rule_kind
@@ -376,8 +401,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         dest_folder,
                         body.get('action', 'move'),
                     ),
-                )
-                conn.commit()
+                    )
+                    conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_json({'error': MANUAL_RULE_CONFLICT_MESSAGE}, 409)
+                return
 
             self._send_json({'ok': True})
             return
@@ -461,30 +489,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send_json({'error': str(error)}, 409)
                 return
 
-            with get_conn() as conn:
-                row = conn.execute(
-                    'SELECT rule_kind FROM rules WHERE id=?',
-                    (int(rule_id),),
-                ).fetchone()
-                if row and row['rule_kind'] == 'template':
-                    self._send_json({'error': '기본 규칙은 수정할 수 없습니다.'}, 403)
-                    return
-                conn.execute(
-                    """
-                    UPDATE rules
-                    SET category=?, category_key=?, ext_pattern=?, dest_folder=?, action=?
-                    WHERE id=?
-                    """,
-                    (
-                        body.get('category') or CATEGORY_DEFINITIONS[category_key]['label'],
-                        category_key,
-                        body.get('ext_pattern') or category_to_ext_pattern(category_key),
-                        dest_folder,
-                        body.get('action', 'move'),
-                        int(rule_id),
-                    ),
-                )
-                conn.commit()
+            try:
+                with get_conn() as conn:
+                    row = conn.execute(
+                        'SELECT rule_kind FROM rules WHERE id=?',
+                        (int(rule_id),),
+                    ).fetchone()
+                    if row and row['rule_kind'] == 'template':
+                        self._send_json({'error': '기본 규칙은 수정할 수 없습니다.'}, 403)
+                        return
+                    conn.execute(
+                        """
+                        UPDATE rules
+                        SET category=?, category_key=?, ext_pattern=?, dest_folder=?, action=?
+                        WHERE id=?
+                        """,
+                        (
+                            body.get('category') or CATEGORY_DEFINITIONS[category_key]['label'],
+                            category_key,
+                            body.get('ext_pattern') or category_to_ext_pattern(category_key),
+                            dest_folder,
+                            body.get('action', 'move'),
+                            int(rule_id),
+                        ),
+                    )
+                    conn.commit()
+            except sqlite3.IntegrityError:
+                self._send_json({'error': MANUAL_RULE_CONFLICT_MESSAGE}, 409)
+                return
 
             self._send_json({'ok': True})
             return

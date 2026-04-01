@@ -424,13 +424,6 @@
 
 <script>
   let currentStep = 1;
-  const PREVIEW_FOLDERS = [
-    ['00영상', 'video'],
-    ['01이미지', 'image'],
-    ['02PDF', 'pdf'],
-    ['03음악', 'audio'],
-  ];
-
   const token = (() => {
     const value = new URLSearchParams(window.location.search).get('token') || '';
     if (value) sessionStorage.setItem('dd_token', value);
@@ -439,6 +432,15 @@
 
   function authHeaders(extra) {
     return Object.assign({ 'X-DropDone-Token': token }, extra || {});
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function goTo(step) {
@@ -458,10 +460,6 @@
     checkbox.checked = card.classList.contains('selected');
   }
 
-  function toggleRule(card) {
-    card.classList.toggle('selected');
-  }
-
   function getSelectedFolders() {
     return Array.from(document.querySelectorAll('.folder-card input:checked')).map((input) => input.dataset.folder);
   }
@@ -470,25 +468,75 @@
     return Array.from(document.querySelectorAll('.rule-card.selected')).map((card) => card.dataset.key);
   }
 
+
+  const PREVIEW_FOLDER_LABELS = {
+    video: '00영상',
+    image: '01이미지',
+    pdf: '02PDF',
+    audio: '03음악',
+  };
+
+  function updateOnboardingCopy() {
+    const hint = document.querySelector('#step3 .hint');
+    if (hint) {
+      hint.textContent = '기본값은 Downloads\\seilF 입니다. 저장하면 선택한 폴더와 기본 규칙이 자동 생성됩니다.';
+    }
+
+    const doneTexts = document.querySelectorAll('#step4 .done-text');
+    if (doneTexts[1]) {
+      doneTexts[1].innerHTML = '<strong>선택한 seilF 템플릿 규칙</strong>은 기본 규칙으로 생성되고, 수동 규칙 개수 제한에 포함되지 않습니다.';
+    }
+  }
+
+  function toggleRule(card) {
+    card.classList.toggle('selected');
+    renderPreview();
+  }
+
   function renderPreview() {
     const baseDir = document.getElementById('baseDirInput').value.trim();
     const previewList = document.getElementById('previewList');
-    previewList.innerHTML = PREVIEW_FOLDERS.map(([label]) => `
-      <div class="preview-row">
-        <span class="preview-name">${label}</span>
-        <span class="preview-path">${baseDir ? `${baseDir}\\${label}` : label}</span>
-      </div>
-    `).join('');
+    const selectedCategories = getSelectedCategories();
+
+    if (!selectedCategories.length) {
+      previewList.innerHTML = '<div class="preview-row"><span class="preview-name">선택된 기본 규칙 없음</span></div>';
+      return;
+    }
+
+    previewList.innerHTML = selectedCategories.map((categoryKey) => {
+      const label = PREVIEW_FOLDER_LABELS[categoryKey] || categoryKey;
+      const previewPath = baseDir ? `${baseDir}\\${label}` : label;
+      return `
+        <div class="preview-row">
+          <span class="preview-name">${escapeHtml(label)}</span>
+          <span class="preview-path">${escapeHtml(previewPath)}</span>
+        </div>
+      `;
+    }).join('');
   }
 
   async function loadDefaults() {
+    const defaultCategories = Object.keys(PREVIEW_FOLDER_LABELS);
+
     try {
       const response = await fetch('/api/settings', { headers: authHeaders() });
       const settings = await response.json();
       document.getElementById('baseDirInput').value = settings.organize_base_dir || '';
+
+      const selectedCategories = Array.isArray(settings.template_categories)
+        ? settings.template_categories
+        : defaultCategories;
+      document.querySelectorAll('.rule-card').forEach((card) => {
+        card.classList.toggle('selected', selectedCategories.includes(card.dataset.key));
+      });
     } catch (error) {
       document.getElementById('baseDirInput').value = 'C:\\Users\\사용자\\Downloads\\seilF';
+      document.querySelectorAll('.rule-card').forEach((card) => {
+        card.classList.toggle('selected', defaultCategories.includes(card.dataset.key));
+      });
     }
+
+    updateOnboardingCopy();
     renderPreview();
   }
 
@@ -500,17 +548,23 @@
     };
 
     try {
-      await fetch('/api/onboarding/save', {
+      const saveRes = await fetch('/api/onboarding/save', {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload),
       });
+      if (!saveRes.ok) {
+        const err = await saveRes.json().catch(() => ({}));
+        alert(err.error || '설정 저장에 실패했습니다. 경로를 확인해 주세요.');
+        return;
+      }
       await fetch('/api/onboarding/complete', {
         method: 'POST',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
       });
-    } finally {
       window.location.href = `/?token=${token}`;
+    } catch (err) {
+      alert('네트워크 오류: ' + err.message);
     }
   }
 
