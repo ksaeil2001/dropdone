@@ -163,3 +163,23 @@ Extension ID는 `native_host/dropdone_host.json`의 `allowed_origins`에 등록 
 - **무료 플랜 규칙**: `FREE_PLAN_MAX_RULES = 3` (manual 규칙만 해당, config.py).
 - **Python 3.11+** 필수. PyInstaller 빌드 시 대상 머신과 동일 버전 사용.
 - **백신 오탐**: `shutdown /s /t 0` (`engine/shutdown.py`)은 일부 백신에서 차단될 수 있음.
+
+## Skill routing
+
+When the user's request matches an available skill, ALWAYS invoke it using the Skill
+tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
+The skill has specialized workflows that produce better results than ad-hoc answers.
+
+Key routing rules:
+- Product ideas, "is this worth building", brainstorming → invoke office-hours
+- Bugs, errors, "why is this broken", 500 errors → invoke investigate
+- Ship, deploy, push, create PR → invoke ship
+- QA, test the site, find bugs → invoke qa
+- Code review, check my diff → invoke review
+- Update docs after shipping → invoke document-release
+- Weekly retro → invoke retro
+- Design system, brand → invoke design-consultation
+- Visual audit, design polish → invoke design-review
+- Architecture review → invoke plan-eng-review
+- Save progress, checkpoint, resume → invoke checkpoint
+- Code quality, health check → invoke health
