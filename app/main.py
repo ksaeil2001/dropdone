@@ -72,7 +72,6 @@ def _setup_logging():
 
 _setup_logging()
 
-from app import notify
 from app.bridge_event_guard import bridge_event_requires_validation, validate_bridge_download_event
 from app.dashboard.server import register_event_bus, register_watcher, start_server
 from app.detector.chrome import ChromeDetector
@@ -88,6 +87,7 @@ from app.engine.db import (
 )
 from app.engine.rules import apply_rules
 from app.tray import build_tray
+from app.utils.notifier import notify
 
 
 def on_download_complete(event: dict):
@@ -101,7 +101,7 @@ def on_download_complete(event: dict):
 
     classified_event = classify_download(event)
     insert_download(classified_event)
-    notify.show('Download complete', classified_event['filename'])
+    notify('Download complete', classified_event['filename'])
     moved = apply_rules(classified_event)
     if moved:
         update_download_result(classified_event.get('id', ''), moved)

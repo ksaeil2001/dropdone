@@ -1,7 +1,6 @@
 import subprocess
 import threading
 import time
-from app import notify
 from .db import get_setting
 
 

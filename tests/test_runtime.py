@@ -111,12 +111,12 @@ class MainPipelineTests(unittest.TestCase):
                 with patch.object(app_main, 'insert_download') as insert_download:
                     with patch.object(app_main, 'insert_error') as insert_error:
                         with patch.object(app_main, 'apply_rules') as apply_rules:
-                            with patch.object(app_main.notify, 'show') as notify_show:
+                            with patch.object(app_main, 'notify') as notify_mock:
                                 app_main.on_download_complete(event)
 
         insert_download.assert_not_called()
         apply_rules.assert_not_called()
-        notify_show.assert_not_called()
+        notify_mock.assert_not_called()
         insert_error.assert_called_once_with('bridge_validation', 'rejected for test', event['path'])
 
     def test_on_download_complete_uses_validated_bridge_event(self):
@@ -136,13 +136,13 @@ class MainPipelineTests(unittest.TestCase):
                 with patch.object(app_main, 'classify_download', return_value=classified) as classify_download:
                     with patch.object(app_main, 'insert_download') as insert_download:
                         with patch.object(app_main, 'apply_rules', return_value=None) as apply_rules:
-                            with patch.object(app_main.notify, 'show') as notify_show:
+                            with patch.object(app_main, 'notify') as notify_mock:
                                 app_main.on_download_complete(event)
 
         classify_download.assert_called_once_with(validated)
         insert_download.assert_called_once_with(classified)
         apply_rules.assert_called_once_with(classified)
-        notify_show.assert_called_once_with('Download complete', classified['filename'])
+        notify_mock.assert_called_once_with('Download complete', classified['filename'])
 
 
 class SingleInstanceTests(unittest.TestCase):
